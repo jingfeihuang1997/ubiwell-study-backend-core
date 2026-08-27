@@ -44,7 +44,12 @@ def get_db_client():
     
     db_user = urllib.parse.quote(str(config.database.username))
     db_pwd = urllib.parse.quote(str(config.database.password))
-    db_uri = f"mongodb://{db_user}:{db_pwd}@{config.database.host}:{config.database.port}/{config.database.database}"
+    auth_source = urllib.parse.quote(str(config.database.auth_source))
+    auth_mechanism = urllib.parse.quote(str(config.database.auth_mechanism))
+    db_uri = (
+        f"mongodb://{db_user}:{db_pwd}@{config.database.host}:{config.database.port}/"
+        f"{config.database.database}?authSource={auth_source}&authMechanism={auth_mechanism}"
+    )
     
     # print(f"DEBUG: MongoDB URI: {db_uri}")
     

@@ -1,2 +1,33 @@
 **/.DS_Store
 
+# Python caches
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment and lock/runtime files
+.python-version
+uv.lock
+*.log
+logs/
+
+# Local deployment/runtime artifacts
+ubiwell_bak/
+uploads/
+data_uploads/
+sockets/
+active_sensing/
+config/
+config-files/
+
+# Local WSGI/bootstrap files
+api_wsgi.py
+internal_wsgi.py
+latest_app_version.txt
+
+# Packaging artifacts
+*.egg-info/
+**/*.egg-info/
+

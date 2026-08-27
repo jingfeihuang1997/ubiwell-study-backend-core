@@ -35,6 +35,7 @@ class CollectionNames:
     GARMIN_RESPIRATION = 'garmin_respiration'
     GARMIN_STEPS = 'garmin_steps'
     GARMIN_ENERGY = 'garmin_energy'
+    GARMIN_SPO2 = 'garmin_spo2'
     
     # EmpaTica data collections - REMOVED (outdated, no longer used)
     

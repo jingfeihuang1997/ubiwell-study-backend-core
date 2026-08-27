@@ -117,6 +117,9 @@ else
 # Generate summaries and plots 30 minutes after processing (at minute 30)
 30 */2 * * * $SUMMARY_SCRIPT --env $ENV_NAME >> $STUDY_DIR/logs/cron_summaries.log 2>&1
 30 */2 * * * $SUMMARY_SCRIPT --plots --env $ENV_NAME >> $STUDY_DIR/logs/cron_plots.log 2>&1
+
+# Rotate cron logs every 6 hours
+15 */6 * * * /usr/sbin/logrotate -s $STUDY_DIR/logs/logrotate.status $STUDY_DIR/logs/logrotate.conf
 EOF
     
     # Install new crontab
@@ -127,6 +130,22 @@ EOF
     
     # Create log directories
     mkdir -p "$STUDY_DIR/logs"
+
+    LOGROTATE_CONF="$STUDY_DIR/logs/logrotate.conf"
+    cat > "$LOGROTATE_CONF" << LOGROTATE_EOF
+$STUDY_DIR/logs/cron_process_data.log
+$STUDY_DIR/logs/cron_garmin.log
+$STUDY_DIR/logs/cron_summaries.log
+$STUDY_DIR/logs/cron_plots.log
+{
+    rotate 7
+    size 50M
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+LOGROTATE_EOF
     
     echo "✅ Cron jobs added successfully!"
     echo ""

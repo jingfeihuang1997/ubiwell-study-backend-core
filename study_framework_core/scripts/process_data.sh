@@ -5,11 +5,12 @@
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STUDY_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Set environment variables
-export PYTHONPATH="${STUDY_DIR}:${PYTHONPATH}"
-export STUDY_CONFIG_FILE="${STUDY_DIR}/config/study_config.json"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
+export STUDY_CONFIG_FILE="${PROJECT_ROOT}/config/study_config.json"
+VENV_PY="${VENV_PY:-/home/ubuntu/wearable/ubiwell-study-backend-core/ubiwell_bak/bin/python}"
 
 # Function to add timestamp to echo statements
 log_echo() {
@@ -27,7 +28,6 @@ show_usage() {
     echo "                      - process_garmin: Process Garmin FIT files"
     echo "  --user USER         Specific user to process (optional)"
     echo "  --date DATE         Specific date in YYYY-MM-DD format (optional)"
-    echo "  --env ENV           Conda environment name (default: study-env)"
     echo "  --help              Show this help message"
     echo ""
     echo "Examples:"
@@ -41,7 +41,6 @@ show_usage() {
 ACTION=""
 USER=""
 DATE=""
-ENV_NAME="study-env"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -56,10 +55,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --date)
             DATE="$2"
-            shift 2
-            ;;
-        --env)
-            ENV_NAME="$2"
             shift 2
             ;;
         --help)
@@ -81,24 +76,14 @@ if [[ -z "$ACTION" ]]; then
     exit 1
 fi
 
-# Check if conda is available
-if ! command -v conda &> /dev/null; then
-    log_echo "Error: conda is not installed or not in PATH"
+# Check python executable
+if [[ ! -x "$VENV_PY" ]]; then
+    log_echo "Error: python not found at $VENV_PY"
     exit 1
 fi
 
-# Activate conda environment
-log_echo "Activating conda environment: $ENV_NAME"
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "$ENV_NAME"
-
-if [[ $? -ne 0 ]]; then
-    log_echo "Error: Failed to activate conda environment: $ENV_NAME"
-    exit 1
-fi
-
-# Change to study directory
-cd "$STUDY_DIR"
+# Change to project root
+cd "$PROJECT_ROOT"
 
 log_echo "Starting data processing..."
 log_echo "Action: $ACTION"
@@ -116,24 +101,24 @@ case "$ACTION" in
     process_data)
         if [[ -n "$USER" ]]; then
             log_echo "Processing data for user: $USER"
-            python -m study_framework_core.core.processing_scripts --action process_data --user "$USER"
+            "$VENV_PY" -m study_framework_core.core.processing_scripts --action process_data --user "$USER"
         else
             log_echo "Processing data for all users"
-            python -m study_framework_core.core.processing_scripts --action process_data
+            "$VENV_PY" -m study_framework_core.core.processing_scripts --action process_data
         fi
         ;;
     generate_summaries)
         if [[ -n "$DATE" ]]; then
             log_echo "Generating summaries for date: $DATE"
-            python -m study_framework_core.core.processing_scripts --action generate_summaries --date "$DATE"
+            "$VENV_PY" -m study_framework_core.core.processing_scripts --action generate_summaries --date "$DATE"
         else
             log_echo "Generating summaries for yesterday"
-            python -m study_framework_core.core.processing_scripts --action generate_summaries
+            "$VENV_PY" -m study_framework_core.core.processing_scripts --action generate_summaries
         fi
         ;;
     process_garmin)
         log_echo "Processing Garmin FIT files"
-        python -m study_framework_core.core.processing_scripts --action process_garmin
+        "$VENV_PY" -m study_framework_core.core.processing_scripts --action process_garmin
         ;;
     *)
         log_echo "Error: Unknown action: $ACTION"
