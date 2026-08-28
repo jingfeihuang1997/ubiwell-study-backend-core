@@ -25,6 +25,19 @@ from study_framework_core.core.config import get_config, set_config_file
 from study_framework_core.core.handlers import get_db
 
 
+# FIT record types decoded from watch uploads. ACCELEROMETER is deliberately absent;
+# see the comment in process_garmin_fit_file. Add it back here to resume collection.
+FIT_TYPES_TO_PROCESS = [
+    "HEART_RATE",
+    "RESPIRATION",
+    "BBI",
+    "STRESS",
+    "STEPS",
+    "ZERO_CROSSING",
+    "FILE_METADATA",
+]
+
+
 class DataProcessor:
     """Main data processor for study data ingestion."""
 
@@ -359,7 +372,16 @@ class DataProcessor:
             output_path = Path(self.config.paths.data_processed_path) / "garmin" / user
             output_path.mkdir(parents=True, exist_ok=True)
             csv_subdir = output_path / f"{input_path.stem}_csv_out"
-            cmd = ["java", "-jar", str(jar_path), str(input_path), "--output_file", str(output_path), "--output_format", "CSV"]
+            # Decode only the metrics this study uses. Accelerometer was 96% of the decoded
+            # output (887 KB of 920 KB from one 128 KB FIT file) and nothing reads it: the
+            # dashboard's charts are heart rate, respiration, HRV and SpO2. Leaving it out
+            # here rather than dropping it at insert time also saves the decode and the
+            # temporary CSV, not just the database write.
+            cmd = [
+                "java", "-jar", str(jar_path), str(input_path),
+                "--output_file", str(output_path), "--output_format", "CSV",
+                "--types_to_process", ",".join(FIT_TYPES_TO_PROCESS),
+            ]
             result = subprocess.run(cmd, capture_output=True, text=True, check=False)
             if result.returncode != 0:
                 self.logger.error("FIT processing failed for %s: %s", input_path, result.stderr)
