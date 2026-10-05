@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import shutil
 import sqlite3
@@ -33,6 +34,7 @@ FIT_TYPES_TO_PROCESS = [
     "BBI",
     "STRESS",
     "STEPS",
+    "SPO2",
     "ZERO_CROSSING",
     "FILE_METADATA",
 ]
@@ -529,7 +531,10 @@ class DataProcessor:
             ts = float(raw_ts)
 
             raw_spo2 = (
-                getattr(row, "spo2", None)
+                # spO2Reading is what fit-processing-cli emits. None of the names below
+                # ever matched it, so garmin_spo2 stayed empty for every participant.
+                getattr(row, "spO2Reading", None)
+                or getattr(row, "spo2", None)
                 or getattr(row, "SpO2", None)
                 or getattr(row, "oxygenSaturation", None)
                 or getattr(row, "bloodOxygen", None)
@@ -537,7 +542,9 @@ class DataProcessor:
                 or 0
             )
             spo2_value = float(raw_spo2)
-            if spo2_value <= 0:
+            # The watch writes a row every 10 s and most say "null", which pandas reads
+            # as NaN. NaN is truthy and not <= 0, so without isfinite it would be stored.
+            if not math.isfinite(spo2_value) or spo2_value <= 0:
                 return None
 
             rec = {
