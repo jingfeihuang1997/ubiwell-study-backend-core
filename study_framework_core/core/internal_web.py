@@ -10,6 +10,7 @@ import time
 import io
 import csv
 import shutil
+import math
 import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -943,6 +944,10 @@ PATIENT_SERIES = [
 ]
 
 
+def _finite(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
 def _epoch_seconds(ts):
     try:
         ts = float(ts)
@@ -980,8 +985,9 @@ class PatientData(Resource):
                                       {'timestamp': {'$gte': lo * 1000, '$lt': hi * 1000}}]},
                 {'_id': 0, 'timestamp': 1, field: 1}).sort('timestamp', 1).limit(20000)
             points = [[_epoch_seconds(d.get('timestamp')), d.get(field)] for d in docs]
+            # The watch logs NaN when it has no valid reading (off-wrist, moving); NaN is not JSON.
             series.append({'key': coll.lower(), 'label': label, 'unit': unit,
-                           'points': [p for p in points if p[0] is not None and p[1] is not None]})
+                           'points': [p for p in points if _finite(p[0]) and _finite(p[1])]})
         start_iso = start.astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%dT%H:%M:%S.000Z')
         end_iso = end.astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%dT%H:%M:%S.000Z')
         return {

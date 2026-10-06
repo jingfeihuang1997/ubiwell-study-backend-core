@@ -228,3 +228,15 @@ def test_data_endpoints_refuse_without_login(db):
     client = app.test_client()
     assert client.get('/internal_web/patient/test_jingfei/data?start=2026-10-06T00:00:00Z&end=2026-10-07T00:00:00Z').status_code == 401
     assert client.post('/internal_web/user-management/update-email', json={'uid': 'test_jingfei', 'email': 'x@y.z'}).status_code == 401
+
+
+def test_day_data_skips_readings_the_watch_could_not_take(web_client, db):
+    # The watch logs stress and respiration as NaN when it has no valid reading; NaN is not JSON.
+    db['garmin_stress'].insert_many([{'uid': 'test_jingfei', 'timestamp': 1791262008, 'heart_rate': float('nan')},
+                                     {'uid': 'test_jingfei', 'timestamp': 1791262068, 'heart_rate': 31.0},
+                                     {'uid': 'test_jingfei', 'timestamp': 1791262128, 'heart_rate': float('inf')}])
+    r = day_data(web_client, '2026-10-06T04:00:00.000Z', '2026-10-07T04:00:00.000Z')
+    import json
+    json.loads(r.get_data(as_text=True))          # strict JSON: would fail on NaN
+    stress = next(s for s in r.json['series'] if s['key'] == 'garmin_stress')
+    assert stress['points'] == [[1791262068, 31.0]]
