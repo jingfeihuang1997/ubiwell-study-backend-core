@@ -10,7 +10,9 @@ import time
 import io
 import csv
 import shutil
+import re
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from collections import defaultdict
 
 from flask import Flask, request, jsonify, render_template, Response, send_from_directory, send_file, session, redirect, url_for
@@ -20,6 +22,7 @@ from markupsafe import Markup
 from study_framework_core.core.config import get_config
 from study_framework_core.core.handlers import get_db, verify_admin_login, get_available_modules
 from study_framework_core.core.dashboard import DashboardBase
+from study_framework_core.core import mindguard
 
 
 def setup_internal_web_logging():
@@ -125,6 +128,7 @@ class InternalWebBase:
         self.api.add_resource(ViewDashboard, '/dashboard')
         self.api.add_resource(ViewDashboardDate, '/dashboard/<date>')
         self.api.add_resource(ViewUserDetail, '/dashboard/view/<user>/<date>')
+        self.api.add_resource(PatientPage, '/patient/<user>')
         self.api.add_resource(ViewAnnouncement, '/dashboard/announcement')
         
         # Data download routes
@@ -145,6 +149,7 @@ class InternalWebBase:
         self.api.add_resource(CreateMultipleUsers, '/user-management/create-multiple')
         self.api.add_resource(GetUsers, '/user-management/users')
         self.api.add_resource(ExportUsers, '/user-management/export')
+        self.api.add_resource(UpdateUserEmail, '/user-management/update-email')
 
 
 def handle_response(message, status):
@@ -378,6 +383,8 @@ class ViewUserDetail(Resource):
                 render_template('user_detail.html', 
                               user=user, date=date,
                               plot_content=Markup(plot_content), 
+                              mindguard_checkins=mindguard.checkins_for_day(
+                                  get_db(), user, current_date.strftime("%Y-%m-%d")),
                               previous_date=previous_date,
                               next_date=next_date), 
                 mimetype='text/html'
@@ -862,6 +869,47 @@ class GetUsers(Resource):
         except Exception as e:
             logging.error(f"Error getting participants: {e}")
             return {'success': False, 'error': str(e)}, 500
+
+
+class UpdateUserEmail(Resource):
+    """Set or change a participant's email; Mind Guard matches check-ins to participants by it."""
+    def post(self):
+        if 'admin_logged_in' not in session:
+            return login_redirect()
+        data = request.get_json(silent=True) or {}
+        uid = data.get('uid')
+        email = (data.get('email') or '').strip()
+        if not uid:
+            return {'success': False, 'error': 'UID is required'}, 400
+        if email and ('@' not in email or len(email) > 254):
+            return {'success': False, 'error': 'Not an email address'}, 400
+        config = get_config()
+        db = get_db()
+        if email and db[config.collections.USERS].find_one(
+                {'uid': {'$ne': uid}, 'email': {'$regex': f'^{re.escape(email)}$', '$options': 'i'}}):
+            return {'success': False, 'error': 'Another participant already has this email'}, 400
+        update = {'$set': {'email': email}} if email else {'$unset': {'email': ''}}
+        result = db[config.collections.USERS].update_one({'uid': uid}, update)
+        if result.matched_count == 0:
+            return {'success': False, 'error': f'No participant {uid}'}, 404
+        # Check-ins that arrived before the email was set are linked now rather than on their next post.
+        if email:
+            db[mindguard.COLLECTION].update_many(
+                {'uid': None, 'email': email.lower()}, {'$set': {'uid': uid}})
+        return {'success': True, 'uid': uid, 'email': email or None}, 200
+
+
+class PatientPage(Resource):
+    """/internal_web/patient/<uid>[?date=YYYY-MM-DD]: the participant's day view, today by default."""
+    def get(self, user):
+        if 'admin_logged_in' not in session:
+            return redirect('/internal_web/login')
+        try:
+            day = (datetime.strptime(request.args['date'], "%Y-%m-%d") if request.args.get('date')
+                   else datetime.now(ZoneInfo(mindguard.TIMEZONE)))
+        except ValueError:
+            return {"message": "date must be YYYY-MM-DD", "status": 400}, 400
+        return redirect(f"/internal_web/dashboard/view/{user}/{day.strftime('%m-%d-%y')}")
 
 
 class ExportUsers(Resource):

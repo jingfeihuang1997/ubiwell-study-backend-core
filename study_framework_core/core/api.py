@@ -19,6 +19,7 @@ from study_framework_core.core.handlers import (
     login_check, login_code_check, save_info, save_user_ping,
     check_end_date, save_file, save_logfile, allowed_file
 )
+from study_framework_core.core.mindguard import MindGuardCheckin
 from study_framework_core.core.schemas import (
     LoginSchema, LoginCodeSchema, UserInfoSchema, UserPingSchema
 )
@@ -132,6 +133,7 @@ class CoreAPIEndpoints:
         self.api.add_resource(UploadEma, '/data/ema-response')
         self.api.add_resource(RequestEmaFile, '/data/ema-request')
         self.api.add_resource(UploadJSON, '/upload-news/')
+        self.api.add_resource(MindGuardCheckin, '/mindguard/checkin')
     
     def handle_response(self, data: Any, status_code: int) -> Dict[str, Any]:
         """Standard response handler."""

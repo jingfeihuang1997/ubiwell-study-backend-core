@@ -399,11 +399,14 @@
             tbody.innerHTML = users.map(user => `
                 <tr>
                     <td><strong>${user.uid}</strong></td>
-                    <td>${user.email || '<span class="text-muted">-</span>'}</td>
+                    <td>${user.email ? escapeHtml(user.email) : '<span class="text-muted">-</span>'}</td>
                     <td>${user.created_at ? new Date(user.created_at * 1000).toLocaleDateString() : '-'}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-info" onclick="viewUserDetails('${user.uid}')">
+                        <button class="btn btn-sm btn-outline-info" title="Open patient page" onclick="viewUserDetails('${user.uid}')">
                             <i class="fas fa-eye"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" title="Edit email (used to match Mind Guard check-ins)" onclick="editUserEmail('${user.uid}', '${(user.email || '').replace(/'/g, '')}')">
+                            <i class="fas fa-envelope"></i>
                         </button>
                     </td>
                 </tr>
@@ -575,9 +578,35 @@
             resultsModal.show();
         }
 
-        // View participant details (placeholder)
+        // Open the participant's day view: wearable data and Mind Guard check-ins
         function viewUserDetails(uid) {
-            showAlert(`View details for participant ${uid} - Feature coming soon!`, 'info');
+            window.location.href = `/internal_web/patient/${encodeURIComponent(uid)}`;
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+        }
+
+        // Mind Guard links an Alexa check-in to a participant by this email (the Amazon account's email)
+        async function editUserEmail(uid, current) {
+            const email = prompt(`Email for ${uid} (the Amazon account used with Alexa). Leave empty to remove.`, current);
+            if (email === null) return;
+            try {
+                const response = await fetch('/internal_web/user-management/update-email', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uid, email: email.trim()})
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showAlert(`Email for ${uid} updated.`, 'success');
+                    loadUsers();
+                } else {
+                    showAlert(`Could not update email: ${result.error || 'unknown error'}`, 'danger');
+                }
+            } catch (error) {
+                showAlert(`Could not update email: ${error.message}`, 'danger');
+            }
         }
     </script>
 </body>

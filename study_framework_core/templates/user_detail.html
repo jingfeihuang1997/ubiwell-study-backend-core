@@ -235,6 +235,19 @@
                 font-size: 2rem;
             }
         }
+
+        .mg-checkin { border: 1px solid var(--gray-200); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+        .mg-head { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-bottom: .5rem; }
+        .mg-status { font-size: .8rem; padding: .1rem .5rem; border-radius: 999px; background: var(--gray-100); color: var(--gray-700); }
+        .mg-status-completed { background: #d1fae5; color: #065f46; }
+        .mg-status-in_progress { background: #dbeafe; color: #1e40af; }
+        .mg-flags { margin-bottom: .5rem; }
+        .mg-flag { padding: .35rem .6rem; border-radius: 6px; margin-bottom: .25rem; font-size: .9rem; }
+        .mg-flag-EMERG { background: #fee2e2; color: #991b1b; }
+        .mg-flag-SAME-DAY { background: #fef3c7; color: #92400e; }
+        .mg-q { color: var(--gray-600); font-size: .85rem; }
+        .mg-a { color: var(--gray-900); }
+        .mg-table td { vertical-align: top; }
     </style>
 </head>
 <body>
@@ -278,7 +291,58 @@
                 {{ plot_content|safe }}
             </div>
         </div>
-        
+
+        <!-- Mind Guard check-ins (Alexa) -->
+        <div class="content-section">
+            <h2 class="section-title">
+                <i class="fas fa-comments"></i>Mind Guard Conversation
+            </h2>
+            {% if not mindguard_checkins %}
+                <p class="text-muted mb-0">No Mind Guard check-in on this day.</p>
+            {% endif %}
+            {% for c in mindguard_checkins %}
+                <div class="mg-checkin">
+                    <div class="mg-head">
+                        <span class="badge bg-primary">Mind Guard</span>
+                        <span class="mg-status mg-status-{{ c.status }}">{{ c.status | replace('_', ' ') }}</span>
+                        <span class="text-muted small">{{ (c.started_at or '')[11:16] }}{% if c.ended_at %}–{{ c.ended_at[11:16] }}{% endif %} UTC</span>
+                        {% if c.private == false %}<span class="badge bg-secondary">not private</span>{% endif %}
+                    </div>
+                    {% set urgent = c.flags | rejectattr('level', 'equalto', 'SUMMARY') | list %}
+                    {% if urgent %}
+                        <div class="mg-flags">
+                            {% for f in urgent %}
+                                <div class="mg-flag mg-flag-{{ f.level }}"><i class="fas fa-triangle-exclamation me-1"></i><strong>{{ f.level }}</strong> {{ f.note }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                    {% if c.asq %}
+                        <div class="small mb-2"><strong>ASQ:</strong> {{ c.asq.result or c.asq | tojson }}</div>
+                    {% endif %}
+                    <table class="table table-sm mg-table mb-2">
+                        <tbody>
+                        {% for a in c.answers %}
+                            <tr>
+                                <td class="text-muted small text-nowrap">{{ (a.at or '')[11:16] }}</td>
+                                <td><div class="mg-q">{{ a.question }}</div><div class="mg-a">{{ a.answer }}</div></td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% set notes = c.flags | selectattr('level', 'equalto', 'SUMMARY') | list %}
+                    {% if c.summary or notes %}
+                        <details class="small">
+                            <summary>Summary ({{ c.summary | length + notes | length }})</summary>
+                            <ul class="mb-0">
+                                {% for s in c.summary %}<li>{{ s }}</li>{% endfor %}
+                                {% for f in notes %}<li>{{ f.note }}</li>{% endfor %}
+                            </ul>
+                        </details>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+
         <!-- Navigation Buttons -->
         <div class="text-center">
             <div class="btn-group" role="group" aria-label="Navigation">

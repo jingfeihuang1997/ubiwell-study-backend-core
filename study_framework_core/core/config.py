@@ -98,6 +98,7 @@ class SecurityConfig:
     allowed_ips: list = None
     cors_origins: list = None
     announcement_pass_key: str = "study123"
+    mindguard_key: Optional[str] = None  # Bearer key the Mind Guard Alexa skill sends; unset = intake off
     
     def __post_init__(self):
         if self.tokens is None:
@@ -198,6 +199,8 @@ class StudyFrameworkConfig:
             self.security.tokens = os.getenv('ALLOWED_TOKENS').split(',')
         if os.getenv('ANNOUNCEMENT_PASS_KEY'):
             self.security.announcement_pass_key = os.getenv('ANNOUNCEMENT_PASS_KEY')
+        if os.getenv('MINDGUARD_KEY'):
+            self.security.mindguard_key = os.getenv('MINDGUARD_KEY')
         
         # Paths - Load from config file first, then environment variables as fallback
         if self.config_file and os.path.exists(self.config_file):
