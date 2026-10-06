@@ -877,11 +877,16 @@ class GetUsers(Resource):
             return {'success': False, 'error': str(e)}, 500
 
 
+def not_logged_in():
+    """JSON 401 for the fetch() calls below; the pages send the browser to the login page themselves."""
+    return {'success': False, 'error': 'not logged in'}, 401
+
+
 class UpdateUserEmail(Resource):
     """Set or change a participant's email; Mind Guard matches check-ins to participants by it."""
     def post(self):
         if 'admin_logged_in' not in session:
-            return login_redirect()
+            return not_logged_in()
         data = request.get_json(silent=True) or {}
         uid = data.get('uid')
         email = (data.get('email') or '').strip()
@@ -951,7 +956,7 @@ class PatientData(Resource):
     [start, end), the viewer's local day sent as UTC instants."""
     def get(self, user):
         if 'admin_logged_in' not in session:
-            return login_redirect()
+            return not_logged_in()
         try:
             start = datetime.fromisoformat(request.args['start'].replace('Z', '+00:00'))
             end = datetime.fromisoformat(request.args['end'].replace('Z', '+00:00'))

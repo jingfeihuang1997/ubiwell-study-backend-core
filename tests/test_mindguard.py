@@ -217,3 +217,14 @@ def test_pages_require_login(db):
     Api(app, prefix='/internal_web').add_resource(internal_web.PatientPage, '/patient/<user>')
     r = app.test_client().get('/internal_web/patient/test_jingfei')
     assert r.status_code == 302 and r.headers['Location'].endswith('/internal_web/login')
+
+
+def test_data_endpoints_refuse_without_login(db):
+    app = Flask(__name__)
+    app.secret_key = 'test'
+    api = Api(app, prefix='/internal_web')
+    api.add_resource(internal_web.PatientData, '/patient/<user>/data')
+    api.add_resource(internal_web.UpdateUserEmail, '/user-management/update-email')
+    client = app.test_client()
+    assert client.get('/internal_web/patient/test_jingfei/data?start=2026-10-06T00:00:00Z&end=2026-10-07T00:00:00Z').status_code == 401
+    assert client.post('/internal_web/user-management/update-email', json={'uid': 'test_jingfei', 'email': 'x@y.z'}).status_code == 401
