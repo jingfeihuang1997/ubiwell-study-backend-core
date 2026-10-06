@@ -130,6 +130,13 @@ def save_checkin(db, checkin):
     return True, uid
 
 
+def checkins_between(db, uid, start_iso, end_iso):
+    """Check-ins that started in [start_iso, end_iso), both UTC ISO strings as the skill writes them."""
+    return list(db[COLLECTION].find(
+        {'uid': uid, 'started_at': {'$gte': start_iso, '$lt': end_iso}},
+        {'_id': 0, 'email': 0, 'updated_at': 0, 'received_at': 0}).sort('started_at', 1))
+
+
 def checkins_for_day(db, uid, date):
     """Check-ins for one participant on one YYYY-MM-DD date (the skill's local date), oldest first."""
     return list(db[COLLECTION].find({'uid': uid, 'date': date}, {'_id': 0}).sort('started_at', 1))

@@ -129,6 +129,7 @@ class InternalWebBase:
         self.api.add_resource(ViewDashboardDate, '/dashboard/<date>')
         self.api.add_resource(ViewUserDetail, '/dashboard/view/<user>/<date>')
         self.api.add_resource(PatientPage, '/patient/<user>')
+        self.api.add_resource(PatientData, '/patient/<user>/data')
         self.api.add_resource(ViewAnnouncement, '/dashboard/announcement')
         
         # Data download routes
@@ -250,6 +251,13 @@ class LandingPage(Resource):
         )
 
 
+def dashboard_participants(db, config, date_timestamp):
+    """Every participant, so one with no data yet still shows (as zeros) instead of vanishing."""
+    uids = {u['uid'] for u in db[config.collections.USERS].find({}, {'uid': 1}) if u.get('uid')}
+    uids |= {s['uid'] for s in db[config.collections.DAILY_SUMMARY].find({'date': date_timestamp}, {'uid': 1}) if s.get('uid')}
+    return [{'uid': uid} for uid in sorted(uids)]
+
+
 class ViewDashboard(Resource):
     """View dashboard for a specific date."""
     def get(self):
@@ -262,8 +270,8 @@ class ViewDashboard(Resource):
         
         logging.info(f"ViewDashboard accessed by {session.get('admin_username')}")
         
-        # Get yesterday's date as default
-        today_date = datetime.now().date() - timedelta(days=1)
+        # Today in the study's time zone (the server runs on UTC, which is already tomorrow in the evening)
+        today_date = datetime.now(ZoneInfo(mindguard.TIMEZONE)).date()
         date_str = today_date.strftime("%m-%d-%y")
         
         # Get users who have daily summaries for this date
@@ -274,8 +282,7 @@ class ViewDashboard(Resource):
         date_timestamp = int(datetime.strptime(date_str, "%m-%d-%y").timestamp())
         
         # Find users who have daily summaries for this date
-        daily_summaries = list(db[config.collections.DAILY_SUMMARY].find({'date': date_timestamp}))
-        users_with_data = [{'uid': summary['uid']} for summary in daily_summaries]
+        users_with_data = dashboard_participants(db, config, date_timestamp)
         
         logging.info(f"Found {len(users_with_data)} users with daily summaries for {date_str}")
         
@@ -314,8 +321,7 @@ class ViewDashboardDate(Resource):
             date_timestamp = int(datetime.strptime(date_str, "%m-%d-%y").timestamp())
             
             # Find users who have daily summaries for this date
-            daily_summaries = list(db[config.collections.DAILY_SUMMARY].find({'date': date_timestamp}))
-            users_with_data = [{'uid': summary['uid']} for summary in daily_summaries]
+            users_with_data = dashboard_participants(db, config, date_timestamp)
             
             logging.info(f"Found {len(users_with_data)} users with daily summaries for {date_str}")
             
@@ -900,16 +906,91 @@ class UpdateUserEmail(Resource):
 
 
 class PatientPage(Resource):
-    """/internal_web/patient/<uid>[?date=YYYY-MM-DD]: the participant's day view, today by default."""
+    """/internal_web/patient/<uid>[?date=YYYY-MM-DD]: one participant's day, wearable data beside Mind Guard.
+
+    The page asks /patient/<uid>/data for the day in the viewer's own time zone, so the day and every
+    time shown follow the browser, not the server.
+    """
     def get(self, user):
         if 'admin_logged_in' not in session:
             return redirect('/internal_web/login')
+        date = request.args.get('date', '')
+        if date:
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                return {"message": "date must be YYYY-MM-DD", "status": 400}, 400
+        config = get_config()
+        db = get_db()
+        if not db[config.collections.USERS].find_one({'uid': user}, {'_id': 1}):
+            return {"message": f"No participant {user}", "status": 404}, 404
+        participants = sorted(u['uid'] for u in db[config.collections.USERS].find({}, {'uid': 1}) if u.get('uid'))
+        return Response(render_template('patient.html', uid=user, initial_date=date, participants=participants),
+                        mimetype='text/html')
+
+
+# Garmin collections shown on the patient page: (collection, value field, label, unit)
+PATIENT_SERIES = [
+    ('GARMIN_HR', 'heart_rate', 'Heart rate', 'bpm'),
+    ('GARMIN_STRESS', 'heart_rate', 'Stress', 'score'),        # stress score is stored under heart_rate
+    ('GARMIN_RESPIRATION', 'respiration', 'Respiration', 'brpm'),
+    ('GARMIN_STEPS', 'steps', 'Steps', 'steps'),
+]
+
+
+def _epoch_seconds(ts):
+    try:
+        ts = float(ts)
+    except (TypeError, ValueError):
+        return None
+    return ts / 1000 if ts > 1e11 else ts       # some sources write milliseconds
+
+
+class PatientData(Resource):
+    """GET /internal_web/patient/<uid>/data?start=<ISO>&end=<ISO>: everything the patient page shows for
+    [start, end), the viewer's local day sent as UTC instants."""
+    def get(self, user):
+        if 'admin_logged_in' not in session:
+            return login_redirect()
         try:
-            day = (datetime.strptime(request.args['date'], "%Y-%m-%d") if request.args.get('date')
-                   else datetime.now(ZoneInfo(mindguard.TIMEZONE)))
-        except ValueError:
-            return {"message": "date must be YYYY-MM-DD", "status": 400}, 400
-        return redirect(f"/internal_web/dashboard/view/{user}/{day.strftime('%m-%d-%y')}")
+            start = datetime.fromisoformat(request.args['start'].replace('Z', '+00:00'))
+            end = datetime.fromisoformat(request.args['end'].replace('Z', '+00:00'))
+        except (KeyError, ValueError):
+            return {'success': False, 'error': 'start and end must be ISO 8601 instants'}, 400
+        if start.tzinfo is None or end.tzinfo is None or not (timedelta(0) < end - start <= timedelta(days=2)):
+            return {'success': False, 'error': 'start/end must carry a time zone and span at most 2 days'}, 400
+        config = get_config()
+        db = get_db()
+        profile = db[config.collections.USERS].find_one({'uid': user}, {'_id': 0, 'uid': 1, 'email': 1, 'created_at': 1})
+        if not profile:
+            return {'success': False, 'error': f'No participant {user}'}, 404
+        code = db[config.collections.USER_CODE_MAPPINGS].find_one({'uid': user}, {'_id': 0, 'uid_code': 1})
+        ping = db[config.collections.USER_PINGS].find_one({'uid': user}, {'_id': 0}, sort=[('_id', -1)])
+        lo, hi = start.timestamp(), end.timestamp()
+        series = []
+        for coll, field, label, unit in PATIENT_SERIES:
+            # Timestamps may be seconds or milliseconds; query both ranges.
+            docs = db[getattr(config.collections, coll)].find(
+                {'uid': user, '$or': [{'timestamp': {'$gte': lo, '$lt': hi}},
+                                      {'timestamp': {'$gte': lo * 1000, '$lt': hi * 1000}}]},
+                {'_id': 0, 'timestamp': 1, field: 1}).sort('timestamp', 1).limit(20000)
+            points = [[_epoch_seconds(d.get('timestamp')), d.get(field)] for d in docs]
+            series.append({'key': coll.lower(), 'label': label, 'unit': unit,
+                           'points': [p for p in points if p[0] is not None and p[1] is not None]})
+        start_iso = start.astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        end_iso = end.astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        return {
+            'success': True,
+            'participant': {
+                'uid': profile['uid'],
+                'email': profile.get('email'),
+                'uid_code': (code or {}).get('uid_code'),
+                'created_at': _epoch_seconds(profile.get('created_at')),
+                'last_phone_contact': _epoch_seconds((ping or {}).get('timestamp') or (ping or {}).get('time')),
+            },
+            'series': series,
+            'checkins': mindguard.checkins_between(db, user, start_iso, end_iso),
+        }, 200
 
 
 class ExportUsers(Resource):

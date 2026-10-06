@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient {{ uid }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f3f4f6; --panel: #ffffff; --line: #e5e7eb; --muted: #6b7280; --ink: #111827;
+            --accent: #2563eb; --emerg-bg: #fee2e2; --emerg-ink: #991b1b; --same-bg: #fef3c7; --same-ink: #92400e;
+        }
+        html, body { height: 100%; }
+        body { margin: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--ink);
+               font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        body > nav.navbar { margin-bottom: 0 !important; background: var(--panel) !important; border-bottom: 1px solid var(--line); }
+        /* The shared nav is drawn for a dark bar; on this white one its menu icon and Logout were invisible */
+        body > nav.navbar .navbar-toggler { border-color: var(--line); }
+        body > nav.navbar .navbar-toggler-icon { background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%2855, 65, 81, 0.9%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e"); }
+        body > nav.navbar .btn-outline-light { color: #374151; border-color: var(--line); }
+
+        /* One window: header on top, two panes that scroll on their own below it */
+        .pt-app { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 16px; }
+        .pt-header { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+                     display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+        .pt-name { font-size: 1.15rem; font-weight: 700; margin: 0; }
+        .pt-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: .85rem; color: var(--muted); }
+        .pt-facts b { color: var(--ink); font-weight: 600; }
+        .pt-controls { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+        .pt-controls .form-select, .pt-controls .form-control { width: auto; font-size: .875rem; }
+        .pt-tz { font-size: .75rem; color: var(--muted); }
+
+        .pt-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
+        .pt-pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-height: 0;
+                   display: flex; flex-direction: column; }
+        .pt-pane-head { padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; display: flex;
+                        align-items: center; gap: 8px; }
+        .pt-pane-head .count { margin-left: auto; font-weight: 400; font-size: .8rem; color: var(--muted); }
+        .pt-pane-body { padding: 12px 14px; overflow-y: auto; min-height: 0; flex: 1; }
+
+        .pt-chart { width: 100%; height: 190px; margin-bottom: 8px; }
+        .pt-empty { color: var(--muted); font-size: .9rem; padding: 6px 0; }
+        .pt-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
+        .pt-stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+        .pt-stat .v { font-size: 1.1rem; font-weight: 700; }
+        .pt-stat .l { font-size: .75rem; color: var(--muted); }
+
+        .mg-checkin { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+        .mg-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; font-size: .85rem; }
+        .mg-status { padding: 1px 8px; border-radius: 999px; background: #f3f4f6; color: #374151; font-size: .75rem; }
+        .mg-status-completed { background: #d1fae5; color: #065f46; }
+        .mg-status-in_progress { background: #dbeafe; color: #1e40af; }
+        .mg-status-ended_safety { background: var(--emerg-bg); color: var(--emerg-ink); }
+        .mg-flag { padding: 4px 8px; border-radius: 6px; margin-bottom: 4px; font-size: .85rem; }
+        .mg-flag-EMERG { background: var(--emerg-bg); color: var(--emerg-ink); }
+        .mg-flag-SAME-DAY { background: var(--same-bg); color: var(--same-ink); }
+        .mg-turn { display: grid; grid-template-columns: 52px 1fr; gap: 2px 8px; padding: 6px 0; border-top: 1px solid #f3f4f6; }
+        .mg-time { color: var(--muted); font-size: .75rem; padding-top: 2px; }
+        .mg-q { color: var(--muted); font-size: .82rem; }
+        .mg-a { font-size: .92rem; }
+        .mg-asq { font-size: .82rem; margin: 4px 0 6px; }
+        details.mg-summary { font-size: .82rem; margin-top: 6px; }
+
+        /* Phones and narrow windows: stack the panes and let the page scroll as a whole */
+        @media (max-width: 900px) {
+            html, body { height: auto; }
+            .pt-app { padding: 10px; }
+            .pt-body { grid-template-columns: 1fr; }
+            .pt-pane-body { overflow: visible; }
+            .pt-controls { margin-left: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    {% include 'navigation.html' %}
+
+    <main class="pt-app">
+        <section class="pt-header">
+            <div>
+                <h1 class="pt-name"><i class="fas fa-user me-2 text-secondary"></i><span id="pt-uid">{{ uid }}</span></h1>
+                <div class="pt-facts">
+                    <span>Email <b id="pt-email">–</b></span>
+                    <span>Login code <b id="pt-code">–</b></span>
+                    <span>Last phone contact <b id="pt-ping">–</b></span>
+                </div>
+            </div>
+            <div class="pt-controls">
+                <select id="pt-patient" class="form-select form-select-sm" aria-label="Patient">
+                    {% for p in participants %}<option value="{{ p }}" {% if p == uid %}selected{% endif %}>{{ p }}</option>{% endfor %}
+                </select>
+                <button id="pt-prev" class="btn btn-sm btn-outline-secondary" title="Previous day"><i class="fas fa-chevron-left"></i></button>
+                <input id="pt-date" type="date" class="form-control form-control-sm" aria-label="Date">
+                <button id="pt-next" class="btn btn-sm btn-outline-secondary" title="Next day"><i class="fas fa-chevron-right"></i></button>
+                <button id="pt-today" class="btn btn-sm btn-outline-primary">Today</button>
+                <span class="pt-tz" id="pt-tz"></span>
+            </div>
+        </section>
+
+        <section class="pt-body">
+            <div class="pt-pane">
+                <div class="pt-pane-head"><i class="fas fa-heart-pulse text-danger"></i>Wearable<span class="count" id="pt-wear-count"></span></div>
+                <div class="pt-pane-body" id="pt-wear"><div class="pt-empty">Loading…</div></div>
+            </div>
+            <div class="pt-pane">
+                <div class="pt-pane-head"><i class="fas fa-comments text-primary"></i>Mind Guard conversation<span class="count" id="pt-log-count"></span></div>
+                <div class="pt-pane-body" id="pt-log"><div class="pt-empty">Loading…</div></div>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script>
+    (function () {
+        const uid = {{ uid | tojson }};
+        const $ = (id) => document.getElementById(id);
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        $('pt-tz').textContent = 'Times in ' + tz;
+
+        // Dates are local calendar days of whoever is viewing.
+        const pad = (n) => String(n).padStart(2, '0');
+        const ymd = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        const parseYmd = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+        const addDays = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
+        const timeOf = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+        const dateTimeOf = (sec) => sec ? new Date(sec * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '–';
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        let current = {{ initial_date | tojson }} || ymd(new Date());
+        let loadId = 0;
+
+        function setUrl(replace) {
+            const url = '/internal_web/patient/' + encodeURIComponent(uid) + '?date=' + current;
+            (replace ? history.replaceState : history.pushState).call(history, { date: current }, '', url);
+        }
+
+        async function load() {
+            const id = ++loadId;
+            $('pt-date').value = current;
+            $('pt-next').disabled = current >= ymd(new Date());
+            const start = parseYmd(current), end = parseYmd(addDays(current, 1));   // local midnight to midnight
+            $('pt-wear').innerHTML = $('pt-log').innerHTML = '<div class="pt-empty">Loading…</div>';
+            $('pt-wear-count').textContent = $('pt-log-count').textContent = '';
+            let data;
+            try {
+                const r = await fetch('/internal_web/patient/' + encodeURIComponent(uid) + '/data?start=' +
+                    encodeURIComponent(start.toISOString()) + '&end=' + encodeURIComponent(end.toISOString()));
+                if (r.redirected || r.status === 401) { location.href = '/internal_web/login'; return; }
+                data = await r.json();
+                if (!data.success) throw new Error(data.error || 'failed');
+            } catch (e) {
+                if (id === loadId) $('pt-wear').innerHTML = $('pt-log').innerHTML = '<div class="pt-empty text-danger">Could not load: ' + esc(e.message) + '</div>';
+                return;
+            }
+            if (id !== loadId) return;                       // a newer day was picked meanwhile
+            const p = data.participant;
+            $('pt-email').textContent = p.email || 'not set';
+            $('pt-code').textContent = p.uid_code || '–';
+            $('pt-ping').textContent = dateTimeOf(p.last_phone_contact);
+            renderWearable(data.series, start, end);
+            renderLog(data.checkins);
+        }
+
+        function renderWearable(series, start, end) {
+            const box = $('pt-wear');
+            const withData = series.filter((s) => s.points.length);
+            $('pt-wear-count').textContent = withData.length ? withData.map((s) => s.points.length).reduce((a, b) => a + b, 0) + ' readings' : '';
+            if (!withData.length) {
+                box.innerHTML = '<div class="pt-empty"><i class="fas fa-circle-info me-1"></i>No watch data for this day yet.</div>';
+                return;
+            }
+            const stats = withData.map((s) => {
+                const vals = s.points.map((q) => q[1]);
+                const v = s.key === 'garmin_steps' ? vals.reduce((a, b) => a + b, 0) : vals.reduce((a, b) => a + b, 0) / vals.length;
+                return '<div class="pt-stat"><div class="v">' + Math.round(v) + ' <small class="text-muted">' + esc(s.unit) + '</small></div><div class="l">' +
+                    esc(s.key === 'garmin_steps' ? 'Steps (total)' : s.label + ' (avg)') + '</div></div>';
+            }).join('');
+            box.innerHTML = '<div class="pt-stats">' + stats + '</div>' + withData.map((s) => '<div class="pt-chart" id="chart-' + s.key + '"></div>').join('');
+            withData.forEach((s) => {
+                Plotly.newPlot('chart-' + s.key, [{
+                    x: s.points.map((q) => new Date(q[0] * 1000)), y: s.points.map((q) => q[1]),
+                    type: s.key === 'garmin_steps' ? 'bar' : 'scatter', mode: 'lines', line: { width: 1.5 },
+                    hovertemplate: '%{x|%H:%M}<br>%{y} ' + s.unit + '<extra></extra>',
+                }], {
+                    title: { text: s.label, font: { size: 13 }, x: 0, xanchor: 'left' },
+                    margin: { l: 40, r: 10, t: 28, b: 28 }, xaxis: { range: [start, end], tickformat: '%H:%M' },
+                    yaxis: { title: { text: s.unit, font: { size: 11 } } },
+                }, { responsive: true, displayModeBar: false });
+            });
+        }
+
+        function renderLog(checkins) {
+            const box = $('pt-log');
+            $('pt-log-count').textContent = checkins.length ? checkins.length + ' check-in' + (checkins.length > 1 ? 's' : '') : '';
+            if (!checkins.length) { box.innerHTML = '<div class="pt-empty">No Mind Guard check-in on this day.</div>'; return; }
+            box.innerHTML = checkins.map((c) => {
+                const urgent = (c.flags || []).filter((f) => f.level !== 'SUMMARY');
+                const notes = (c.flags || []).filter((f) => f.level === 'SUMMARY');
+                const asq = c.asq ? ['q1', 'q2', 'q3', 'q4'].filter((k) => k in c.asq).map((k) => k.toUpperCase() + ' ' + esc(c.asq[k])).join(' · ') : '';
+                return '<div class="mg-checkin">' +
+                    '<div class="mg-head"><span class="badge bg-primary">Mind Guard</span>' +
+                    '<span class="mg-status mg-status-' + esc(c.status) + '">' + esc(String(c.status).replace('_', ' ')) + '</span>' +
+                    '<span class="text-muted">' + timeOf(c.started_at) + (c.ended_at ? '–' + timeOf(c.ended_at) : '') + '</span>' +
+                    (c.private === false ? '<span class="badge bg-secondary">not private</span>' : '') + '</div>' +
+                    urgent.map((f) => '<div class="mg-flag mg-flag-' + esc(f.level) + '"><i class="fas fa-triangle-exclamation me-1"></i><strong>' +
+                        esc(f.level) + '</strong> ' + esc(f.note) + '</div>').join('') +
+                    (asq ? '<div class="mg-asq"><strong>ASQ screen:</strong> ' + asq + '</div>' : '') +
+                    (c.answers || []).map((a) => '<div class="mg-turn"><div class="mg-time">' + timeOf(a.at) + '</div><div><div class="mg-q">' +
+                        esc(a.question) + '</div><div class="mg-a">' + esc(a.answer) + '</div></div></div>').join('') +
+                    ((c.summary || []).length || notes.length ? '<details class="mg-summary"><summary>Summary (' + ((c.summary || []).length + notes.length) + ')</summary><ul class="mb-0">' +
+                        (c.summary || []).map((s) => '<li>' + esc(s) + '</li>').join('') + notes.map((f) => '<li>' + esc(f.note) + '</li>').join('') + '</ul></details>' : '') +
+                    '</div>';
+            }).join('');
+        }
+
+        function go(date) { if (!date) return; current = date; setUrl(false); load(); }
+        $('pt-prev').onclick = () => go(addDays(current, -1));
+        $('pt-next').onclick = () => go(addDays(current, 1));
+        $('pt-today').onclick = () => go(ymd(new Date()));
+        $('pt-date').onchange = (e) => go(e.target.value);
+        $('pt-patient').onchange = (e) => {           // same day, other patient
+            location.href = '/internal_web/patient/' + encodeURIComponent(e.target.value) + '?date=' + current;
+        };
+        window.onpopstate = (e) => { current = (e.state && e.state.date) || ymd(new Date()); load(); };
+
+        setUrl(true);
+        load();
+    })();
+    </script>
+</body>
+</html>

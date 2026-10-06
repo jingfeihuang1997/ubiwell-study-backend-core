@@ -44,6 +44,7 @@ def web_client(db, monkeypatch):
     api.add_resource(internal_web.ViewUserDetail, '/dashboard/view/<user>/<date>')
     api.add_resource(internal_web.ViewDashboardDate, '/dashboard/<date>')
     api.add_resource(internal_web.PatientPage, '/patient/<user>')
+    api.add_resource(internal_web.PatientData, '/patient/<user>/data')
     api.add_resource(internal_web.UpdateUserEmail, '/user-management/update-email')
     from study_framework_core.core import processing_scripts
     monkeypatch.setattr(processing_scripts.DataProcessor, '__init__', lambda self: None)
@@ -159,10 +160,55 @@ def test_day_page_without_checkins_says_so(web_client):
     assert 'No Mind Guard check-in on this day.' in page
 
 
-def test_patient_url_redirects_to_day_view(web_client):
-    r = web_client.get('/internal_web/patient/test_jingfei?date=2026-10-06')
-    assert r.status_code == 302 and r.headers['Location'].endswith('/internal_web/dashboard/view/test_jingfei/10-06-26')
+def test_patient_page_renders_for_known_participant(web_client):
+    r = web_client.get('/internal_web/patient/test_jingfei?date=2026-10-05')
+    page = r.get_data(as_text=True)
+    assert r.status_code == 200 and 'pt-body' in page and '"2026-10-05"' in page
+    assert 'viewdashboarddate' not in page and '/internal_web/dashboard/10-' not in page   # no jump back to the study dashboard
     assert web_client.get('/internal_web/patient/test_jingfei?date=bad').status_code == 400
+    assert web_client.get('/internal_web/patient/nobody').status_code == 404
+
+
+def day_data(client, start, end):
+    return client.get(f'/internal_web/patient/test_jingfei/data?start={start}&end={end}')
+
+
+def test_day_data_follows_viewer_local_day(api_client, web_client):
+    # 23:47 in New York on Oct 5 is 03:47 UTC on Oct 6: it belongs to the New York viewer's Oct 5.
+    post(api_client, checkin(checkin_id='late', date='2026-10-05', started_at='2026-10-06T03:47:31.384Z'))
+    post(api_client, checkin(checkin_id='next', date='2026-10-06', started_at='2026-10-06T05:34:19.112Z'))
+    oct5_ny = day_data(web_client, '2026-10-05T04:00:00.000Z', '2026-10-06T04:00:00.000Z').json
+    oct6_ny = day_data(web_client, '2026-10-06T04:00:00.000Z', '2026-10-07T04:00:00.000Z').json
+    assert [c['checkin_id'] for c in oct5_ny['checkins']] == ['late']
+    assert [c['checkin_id'] for c in oct6_ny['checkins']] == ['next']
+    # A viewer in UTC sees both on Oct 6.
+    oct6_utc = day_data(web_client, '2026-10-06T00:00:00.000Z', '2026-10-07T00:00:00.000Z').json
+    assert [c['checkin_id'] for c in oct6_utc['checkins']] == ['late', 'next']
+    assert 'email' not in oct5_ny['checkins'][0]
+
+
+def test_day_data_includes_participant_and_wearable(web_client, db):
+    db['garmin_hr'].insert_many([{'uid': 'test_jingfei', 'timestamp': 1791262000, 'heart_rate': 61.0},
+                                 {'uid': 'test_jingfei', 'timestamp': 1791262000 * 1000 + 10, 'heart_rate': 64.0},
+                                 {'uid': 'someone_else', 'timestamp': 1791262000, 'heart_rate': 99.0}])
+    db['user_code_mappings'].insert_one({'uid': 'test_jingfei', 'uid_code': 'B61H06'})
+    d = day_data(web_client, '2026-10-06T04:00:00.000Z', '2026-10-07T04:00:00.000Z').json
+    assert d['participant']['uid_code'] == 'B61H06' and d['participant']['email'] == 'teen@example.com'
+    hr = next(s for s in d['series'] if s['key'] == 'garmin_hr')
+    assert [p[1] for p in hr['points']] == [61.0, 64.0]              # seconds and milliseconds, this user only
+
+
+@pytest.mark.parametrize('qs', ['', 'start=x&end=y', 'start=2026-10-06T00:00:00&end=2026-10-07T00:00:00',
+                                'start=2026-10-06T00:00:00Z&end=2026-10-10T00:00:00Z'])
+def test_day_data_rejects_bad_ranges(web_client, qs):
+    assert web_client.get('/internal_web/patient/test_jingfei/data?' + qs).status_code == 400
+
+
+def test_dashboard_lists_every_participant(db):
+    from study_framework_core.core.internal_web import dashboard_participants
+    db['users'].insert_one({'uid': 'quiet_one'})
+    db['daily_summaries'].insert_one({'uid': 'test_jingfei', 'date': 123})
+    assert [u['uid'] for u in dashboard_participants(db, get_config(), 123)] == ['quiet_one', 'test_jingfei']
 
 
 def test_pages_require_login(db):

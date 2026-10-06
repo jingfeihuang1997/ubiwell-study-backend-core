@@ -101,7 +101,7 @@ class DashboardBase(ABC):
             'garmin_worn': 0.0,
             'garmin_on': 0.0,
             'distance_traveled': 0.0,
-            'details': f"<a href='/internal_web/dashboard/view/{uid}/{date_str}' class='btn-details'>View Details</a>"
+            'details': f"<a href='/internal_web/patient/{uid}?date={datetime.strptime(date_str, '%m-%d-%y').strftime('%Y-%m-%d')}' class='btn-details'>View Details</a>"
         }
         
         if daily_summary:
