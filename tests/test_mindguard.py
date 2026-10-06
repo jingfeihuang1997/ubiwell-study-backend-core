@@ -148,6 +148,12 @@ def test_day_page_shows_checkin_escaped_with_flags(api_client, web_client):
     assert 'Low mood most days' in page and 'SAME-DAY' in page
 
 
+def test_day_page_shows_asq_answers(api_client, web_client):
+    post(api_client, checkin(status='ended_safety', asq={'q1': 'yes', 'q2': 'no', 'q3': 'no', 'q4': 'no'}))
+    page = web_client.get('/internal_web/dashboard/view/test_jingfei/10-06-26').get_data(as_text=True)
+    assert 'Q1 yes' in page and 'ended safety' in page
+
+
 def test_day_page_without_checkins_says_so(web_client):
     page = web_client.get('/internal_web/dashboard/view/test_jingfei/10-05-26').get_data(as_text=True)
     assert 'No Mind Guard check-in on this day.' in page

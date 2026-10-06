@@ -24,7 +24,7 @@ from study_framework_core.core.handlers import get_db
 
 COLLECTION = 'mindguard_checkins'
 TIMEZONE = 'America/New_York'  # the skill dates check-ins in this zone (Mind Guard CONFIG.TIMEZONE)
-STATUSES = {'in_progress', 'completed', 'abandoned', 'stopped'}
+STATUSES = {'in_progress', 'stopped', 'completed', 'ended_safety', 'abandoned'}
 FLAG_LEVELS = {'EMERG', 'SAME-DAY', 'SUMMARY'}
 MAX_TEXT = 2000
 MAX_ITEMS = 300

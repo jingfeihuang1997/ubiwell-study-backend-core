@@ -241,6 +241,7 @@
         .mg-status { font-size: .8rem; padding: .1rem .5rem; border-radius: 999px; background: var(--gray-100); color: var(--gray-700); }
         .mg-status-completed { background: #d1fae5; color: #065f46; }
         .mg-status-in_progress { background: #dbeafe; color: #1e40af; }
+        .mg-status-ended_safety { background: #fee2e2; color: #991b1b; }
         .mg-flags { margin-bottom: .5rem; }
         .mg-flag { padding: .35rem .6rem; border-radius: 6px; margin-bottom: .25rem; font-size: .9rem; }
         .mg-flag-EMERG { background: #fee2e2; color: #991b1b; }
@@ -317,7 +318,9 @@
                         </div>
                     {% endif %}
                     {% if c.asq %}
-                        <div class="small mb-2"><strong>ASQ:</strong> {{ c.asq.result or c.asq | tojson }}</div>
+                        <div class="small mb-2"><strong>ASQ screen:</strong>
+                            {% for k in ['q1', 'q2', 'q3', 'q4'] if k in c.asq %}{{ k | upper }} {{ c.asq[k] }}{% if not loop.last %} · {% endif %}{% endfor %}
+                        </div>
                     {% endif %}
                     <table class="table table-sm mg-table mb-2">
                         <tbody>
