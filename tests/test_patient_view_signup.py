@@ -261,7 +261,7 @@ def test_staff_form_is_validated(client, bad):
     assert client.post('/internal_web/signup/submit', json=dict(STAFF, **bad)).status_code == 400
 
 
-def test_signup_is_public_and_stored_pending(client, db):
+def test_signup_is_public_and_stored_pending(client, db, web_login):
     r = client.post('/internal_web/signup/submit', json=PARTICIPANT)
     assert r.status_code == 200 and r.json['request']['email'] == 'sam@example.com'
     doc = db[signup.COLLECTION].find_one()
@@ -425,6 +425,12 @@ def test_data_endpoint_takes_a_custom_range_of_up_to_31_days(client, db):
 
 # --------------------------------------------------------------------------- participant web logins, dashboard
 @pytest.fixture
+def web_login(monkeypatch):
+    """Participants' own web login switched on (it is off during the study)."""
+    monkeypatch.setattr(signup, 'PARTICIPANT_WEB_LOGIN', True)
+
+
+@pytest.fixture
 def full_client(db):
     """The whole internal web, as deployed (all routes), on the test database."""
     app = Flask(__name__, template_folder=os.path.join(os.path.dirname(os.path.dirname(internal_web.__file__)), 'templates'))
@@ -442,7 +448,7 @@ def approve_first(client, **body):
     return r
 
 
-def test_claim_gives_an_existing_participant_a_login_and_shows_only_their_data(full_client, db, monkeypatch):
+def test_claim_gives_an_existing_participant_a_login_and_shows_only_their_data(full_client, db, monkeypatch, web_login):
     monkeypatch.setattr(internal_web, 'verify_admin_login', lambda u, p: {'success': False, 'error': 'no'})
     db['users'].insert_one({'uid': 'p2', 'email': 'other@example.com'})
     full_client.post('/internal_web/signup/submit', json=dict(PARTICIPANT, email='teen@example.com'))
@@ -480,11 +486,11 @@ def test_dashboard_rows_todos_and_warnings(full_client, db):
     assert rows[0]['type'] == 'request' and rows[0]['todos'][0]['key'] == 'review'
     p1 = next(r for r in rows if r.get('uid') == 'p1')
     keys = {t['key']: t['who'] for t in p1['todos']}
-    assert keys == {'profile': 'admin', 'clinical': 'admin', 'app': 'participant', 'login': 'participant'}  # Alexa connected already
+    assert keys == {'profile': 'admin', 'clinical': 'admin', 'app': 'participant'}  # Alexa connected already; no web-login to-do while that is off
     assert 'B6AAAA' in next(t['text'] for t in p1['todos'] if t['key'] == 'app')
     assert [w['text'] for w in p1['warnings']] == ['Repeated vomiting', 'Headache (worst): 8 / 10']
     p3 = next(r for r in rows if r.get('uid') == 'p3')
-    assert {t['key'] for t in p3['todos']} == {'email', 'watch', 'login'} and p3['warnings'] == []
+    assert {t['key'] for t in p3['todos']} == {'email', 'watch'} and p3['warnings'] == []
     assert full_client.get('/internal_web/dashboard').status_code == 200
     assert full_client.get('/internal_web/user-management').headers['Location'].endswith('/internal_web/dashboard')
 
@@ -520,3 +526,137 @@ def test_participant_passwords_are_salted():
     assert a != b and a.startswith("pbkdf2_sha256$") and "same-password" not in a
     assert signup.check_salted("same-password", a) and not signup.check_salted("other", a)
     assert not signup.check_salted("x", hashlib.sha256(b"x").hexdigest())          # an unsalted hash is never accepted
+
+
+# --------------------------------------------------------------------------- export / import, no secrets
+import io as _io
+import json as _json
+import zipfile as _zipfile
+from study_framework_core.core import participant_io
+
+
+def seed_p1(db):
+    db['users'].update_one({'uid': 'p1'}, {'$set': {'study_pass': 'S3cret!pass', 'garmin_pass': 'G4rmin!pass', 'file_encryption_key': 'k' * 16,
+                                                    'profile': {'name': 'Sam', 'age': 15, 'injury_date': '2026-10-01'}}})
+    db['user_code_mappings'].insert_one({'uid': 'p1', 'uid_code': 'B6AAAA'})
+    db['mindguard_checkins'].insert_one({'uid': 'p1', 'checkin_id': 'mg.x.2026-10-06.1', 'date': '2026-10-06', 'status': 'completed', 'seq': 3,
+                                         'started_at': '2026-10-06T14:00:00.000Z', 'email': 'teen@example.com',
+                                         'answers': [{'at': '2026-10-06T14:00:10.000Z', 'item': 'symptoms', 'node': 'h_worst',
+                                                      'question': 'How strong?', 'answer': 'six', 'cls': 'answer', 'num': 6}], 'flags': [], 'summary': []})
+    db['questionnaires'].insert_one({'uid': 'p1', 'scale': 'GAD-7', 'completed_at': '2026-10-06T15:00:00.000Z', 'total': 12})
+    db['garmin_hr'].insert_many([{'uid': 'p1', 'timestamp': ts('2026-10-06T12:00') + i * 60, 'heart_rate': 70 + i} for i in range(5)])
+    db['garmin_hr'].insert_one({'uid': 'p1', 'timestamp': ts('2026-09-01T12:00'), 'heart_rate': 60})
+
+
+def unzip(data):
+    z = _zipfile.ZipFile(_io.BytesIO(data))
+    return z, _json.loads(z.read('participant.json'))
+
+
+def test_export_has_everything_but_secrets(full_client, db):
+    seed_p1(db)
+    login(full_client)
+    r = full_client.get('/internal_web/participants/p1/export?tz=' + NY)
+    assert r.status_code == 200 and r.mimetype == 'application/zip' and 'mindguard_p1_all_' in r.headers['Content-Disposition']
+    z, b = unzip(r.data)
+    names = set(z.namelist())
+    assert {'participant.json', 'checkins.csv', 'results.csv', 'sleep_estimates.csv', 'watch/heart_rate.csv', 'README.txt'} <= names
+    assert 'watch/beat_intervals.csv' not in names
+    assert b['format'] == 'mindguard-participant' and b['participant']['watch_login_code'] == 'B6AAAA'
+    assert b['participant']['profile'] == {'name': 'Sam', 'age': 15, 'injury_date': '2026-10-01'}
+    assert len(b['checkins']) == 1 and 'email' not in b['checkins'][0] and len(b['questionnaires']) == 1
+    everything = b''.join(z.read(n) for n in names)
+    for secret in (b'S3cret!pass', b'G4rmin!pass', b'k' * 16, b'study_pass', b'garmin_pass'):
+        assert secret not in everything
+    assert z.read('watch/heart_rate.csv').decode().count('\n') == 7          # header + 6 readings
+    assert 'h_worst,How strong?,six,answer,,6' in z.read('checkins.csv').decode()
+    week = full_client.get('/internal_web/participants/p1/export?from=2026-10-04&to=2026-10-10&beats=1&tz=' + NY)
+    z, b = unzip(week.data)
+    assert z.read('watch/heart_rate.csv').decode().count('\n') == 6 and 'watch/beat_intervals.csv' in z.namelist()
+    assert b['range']['from'] == '2026-10-04T04:00:00.000Z'
+    assert full_client.get('/internal_web/participants/p1/export?from=2026-10-10&to=2026-10-04').status_code == 400
+    assert full_client.get('/internal_web/participants/nobody/export').status_code == 404
+
+
+def test_import_restores_and_never_doubles(full_client, db):
+    seed_p1(db)
+    login(full_client)
+    data = full_client.get('/internal_web/participants/p1/export?tz=' + NY).data
+    db['mindguard_checkins'].delete_many({}); db['questionnaires'].delete_many({})
+    db['users'].update_one({'uid': 'p1'}, {'$unset': {'profile.injury_date': ''}, '$set': {'profile.name': 'Samuel'}})
+    post = lambda body, **form: full_client.post('/internal_web/participants/p1/import',
+                                                 data=dict({'file': (_io.BytesIO(body), 'export.zip')}, **form), content_type='multipart/form-data')
+    plan = post(data).json['plan']
+    assert plan['checkins']['new'] == 1 and plan['questionnaires']['new'] == 1 and not plan['errors']
+    assert {(x['field'], x['action']) for x in plan['profile']} == {('injury_date', 'add'), ('name', 'keep')}
+    assert db['mindguard_checkins'].count_documents({}) == 0                    # checking writes nothing
+    done = post(data, apply='1').json
+    assert done['applied'] and db['mindguard_checkins'].find_one()['uid'] == 'p1' and db['questionnaires'].count_documents({}) == 1
+    prof = db['users'].find_one({'uid': 'p1'})['profile']
+    assert prof['injury_date'] == '2026-10-01' and prof['name'] == 'Samuel'      # empty field filled, different one kept
+    again = post(data).json['plan']
+    assert again['checkins']['unchanged'] == 1 and again['questionnaires']['unchanged'] == 1
+    post(data, apply='1', overwrite='1')
+    assert db['users'].find_one({'uid': 'p1'})['profile']['name'] == 'Sam'        # replaced only when asked
+    # a newer copy of the check-in (higher seq) replaces the stored one; an older one does not
+    b = _json.loads(_zipfile.ZipFile(_io.BytesIO(data)).read('participant.json'))
+    b['checkins'][0]['seq'] = 9; b['checkins'][0]['status'] = 'stopped'
+    assert post(_json.dumps(b).encode(), apply='1').json['plan']['checkins']['newer'] == 1
+    assert db['mindguard_checkins'].find_one()['seq'] == 9
+    assert post(data).json['plan']['checkins']['older'] == 1
+
+
+def test_import_guards(full_client, db):
+    seed_p1(db)
+    db['users'].insert_one({'uid': 'p2', 'email': 'two@example.com'})
+    login(full_client)
+    data = full_client.get('/internal_web/participants/p1/export?tz=' + NY).data
+    post = lambda uid, body, **form: full_client.post(f'/internal_web/participants/{uid}/import',
+                                                      data=dict({'file': (_io.BytesIO(body), 'f.zip')}, **form), content_type='multipart/form-data')
+    p = post('p2', data).json['plan']
+    assert p['file_uid'] == 'p1' and p['checkins']['other_participant'] == 1 and p['checkins']['new'] == 0   # p1's check-in stays with p1
+    assert any('belong to p1' in n for n in p['not_imported'])
+    for bad in (b'', b'not json', b'{"format": "other"}', _json.dumps({'format': 'mindguard-participant', 'version': 2}).encode()):
+        r = post('p2', bad)
+        assert r.status_code == 400 and r.json['error']
+    assert full_client.post('/internal_web/participants/p2/import', data={}, content_type='multipart/form-data').status_code == 400
+    with full_client.session_transaction() as s:
+        s.clear(); s['participant_uid'] = 'p1'
+    assert post('p1', data).status_code == 401                                   # participants cannot import
+    assert full_client.get('/internal_web/participants/p1/export').status_code == 200   # but can export their own
+    assert full_client.get('/internal_web/participants/p2/export').status_code == 401
+
+
+def test_lists_and_created_users_carry_no_passwords(full_client, db, monkeypatch):
+    seed_p1(db)
+    login(full_client)
+    for url in ('/internal_web/participants/export.csv', '/internal_web/user-management/export'):
+        text = full_client.get(url).data.decode()
+        assert text.startswith('participant_id,name,') and 'S3cret' not in text and 'pass' not in text.splitlines()[0].lower()
+    import study_framework_core.core.handlers as handlers
+    monkeypatch.setattr(handlers, 'create_user', lambda uid, email, study_id: {'success': True, 'user': {
+        'uid': uid, 'uid_code': 'B6ZZZZ', 'study_pass': 'x1', 'garmin_pass': 'x2', 'email': email}})
+    r = full_client.post('/internal_web/user-management/create-single', json={'uid': 'new1'})
+    assert r.json['user'] == {'uid': 'new1', 'uid_code': 'B6ZZZZ', 'email': None}
+    assert full_client.get('/internal_web/', headers={'Accept': 'text/html'}).headers['Location'].endswith('/internal_web/dashboard')
+
+
+def test_create_single_refuses_an_email_another_participant_has(full_client, db):
+    login(full_client)
+    r = full_client.post('/internal_web/user-management/create-single', json={'uid': 'dup1', 'email': 'TEEN@example.com'})
+    assert r.status_code == 400 and 'already has this email' in r.json['error'] and not db['users'].find_one({'uid': 'dup1'})
+
+
+def test_participant_web_login_off_by_default(full_client, db, monkeypatch):
+    assert signup.PARTICIPANT_WEB_LOGIN is False
+    r = full_client.post('/internal_web/signup/submit', json={k: v for k, v in PARTICIPANT.items() if k != 'password'})
+    assert r.status_code == 200 and 'password_hash' not in db[signup.COLLECTION].find_one()      # no password needed or kept
+    taken = full_client.post('/internal_web/signup/submit', json=dict(PARTICIPANT, email='teen@example.com'))
+    assert taken.status_code == 400 and 'already registered' in taken.json['error']               # no "claim a login"
+    assert full_client.post('/internal_web/signup/submit', json=dict(STAFF, password='short')).status_code == 400   # staff still need one
+    db[signup.LOGINS].insert_one({'email': 'teen@example.com', 'password_hash': signup.salted_hash('sam-secret-1'), 'uid': 'p1'})
+    monkeypatch.setattr(internal_web, 'verify_admin_login', lambda u, p: {'success': False, 'error': 'Invalid username or password'})
+    assert full_client.post('/internal_web/login-handler', json={'username': 'teen@example.com', 'password': 'sam-secret-1'}).status_code == 401
+    assert b'email for participants' not in full_client.get('/internal_web/login').data
+    page = full_client.get('/internal_web/signup').data.decode()
+    assert 'const PLOGIN = false' in page and 'data-for="staff" hidden' in page

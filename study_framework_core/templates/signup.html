@@ -67,11 +67,13 @@
                         <div class="mg-field"><label for="f-user">Username</label><input class="mg-input" id="f-user" name="username" autocomplete="username" maxlength="40">
                             <span class="mg-hint">3 to 40 letters, digits, dots, dashes or underscores. You sign in with it.</span></div>
                     </div>
+                    <div{% if not participant_login %} data-for="staff" hidden{% endif %}>
                     <div class="su-row">
                         <div class="mg-field"><label for="f-pass">Password</label><input class="mg-input" id="f-pass" name="password" type="password" autocomplete="new-password" minlength="8"></div>
                         <div class="mg-field"><label for="f-pass2">Confirm password</label><input class="mg-input" id="f-pass2" type="password" autocomplete="new-password"></div>
                     </div>
                     <p class="mg-hint" id="f-pass-hint" style="margin:-.4rem 0 .75rem"></p>
+                    </div>
 
                     <div class="mg-error" id="su-error" role="alert" hidden></div>
                     <button class="mg-btn mg-btn--primary" type="submit" style="width:100%;margin-top:.5rem">Review my information</button>
@@ -104,6 +106,8 @@
         const $ = (id) => document.getElementById(id);
         const form = $('su-form');
         const kind = () => form.querySelector('input[name="kind"]:checked').value;
+        const PLOGIN = {{ 'true' if participant_login else 'false' }};   // participants sign in on the site (off during the study)
+        const needsPassword = (k) => k === 'staff' || PLOGIN;
         const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
         function paintKind() {
@@ -122,7 +126,8 @@
 
         function collect() {
             const k = kind(), v = (id) => $(id).value.trim();
-            const data = { kind: k, name: v('f-name'), email: v('f-email'), password: $('f-pass').value };
+            const data = { kind: k, name: v('f-name'), email: v('f-email') };
+            if (needsPassword(k)) data.password = $('f-pass').value;
             if (k === 'participant') Object.assign(data, { age: v('f-age'), gender: $('f-gender').value });
             else Object.assign(data, { username: v('f-user'), role: v('f-role') });
             return data;
@@ -137,8 +142,10 @@
             if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(d.email)) return 'Enter a valid email address.';
             if (d.email.toLowerCase() !== $('f-email2').value.trim().toLowerCase()) return 'The two emails do not match.';
             if (d.kind === 'staff' && !/^[A-Za-z0-9._-]{3,40}$/.test(d.username)) return 'Username: 3 to 40 letters, digits, dots, dashes or underscores.';
-            if (d.password.length < 8) return 'Password: at least 8 characters.';
-            if (d.password !== $('f-pass2').value) return 'The two passwords do not match.';
+            if (needsPassword(d.kind)) {
+                if (d.password.length < 8) return 'Password: at least 8 characters.';
+                if (d.password !== $('f-pass2').value) return 'The two passwords do not match.';
+            }
             return null;
         }
         function showError(id, msg) { $(id).textContent = msg || ''; $(id).hidden = !msg; }
@@ -153,7 +160,7 @@
             const rows = [['Account', d.kind === 'participant' ? 'Study participant' : 'Study staff'], ['Name', d.name]];
             if (d.kind === 'participant') rows.push(['Age', d.age], ['Gender', $('f-gender').selectedOptions[0].textContent], ['Amazon account email', d.email]);
             else rows.push(['Work email', d.email], ['Role', d.role || '–'], ['Username', d.username]);
-            rows.push(['Password', '•'.repeat(Math.min(d.password.length, 12))]);
+            if (d.password) rows.push(['Password', '•'.repeat(Math.min(d.password.length, 12))]);
             $('su-review-list').innerHTML = rows.map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>').join('');
             form.hidden = true; $('su-review').hidden = false; $('st2').classList.add('on');
             showError('su-error2', null);
@@ -169,7 +176,9 @@
                     ? 'Your information was sent to the study admin for review. You can sign in as ' + pending.username + ' once it is approved.'
                     : res.request.existing
                     ? 'The study team has already added you to the study. Your request for a login was sent to the study admin; once it is approved, sign in here with ' + pending.email + ' and your password to see your own data.'
-                    : 'Your information was sent to the study admin for review. Once it is approved, sign in here with ' + pending.email + ' and your password to see your own data, and the study team will give you a login code for the watch app. Mind Guard on Alexa will recognise you by this email.';
+                    : PLOGIN
+                    ? 'Your information was sent to the study admin for review. Once it is approved, sign in here with ' + pending.email + ' and your password to see your own data, and the study team will give you a login code for the watch app. Mind Guard on Alexa will recognise you by this email.'
+                    : 'Your information was sent to the study admin for review. Once it is approved, the study team will give you a login code for the watch app. Mind Guard on Alexa will recognise you by ' + pending.email + '.';
                 pending.password = '';
                 $('su-done').showModal();
             } catch (err) {

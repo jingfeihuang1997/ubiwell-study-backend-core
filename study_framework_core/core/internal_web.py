@@ -24,7 +24,7 @@ from markupsafe import Markup
 from study_framework_core.core.config import get_config
 from study_framework_core.core.handlers import get_db, verify_admin_login, get_available_modules
 from study_framework_core.core.dashboard import DashboardBase
-from study_framework_core.core import mindguard, participants, patient_view, signup
+from study_framework_core.core import mindguard, participant_io, participants, patient_view, signup
 
 
 def setup_internal_web_logging():
@@ -130,6 +130,9 @@ class InternalWebBase:
         self.api.add_resource(ParticipantsDashboard, '/dashboard')        # the participant list (was the daily compliance table)
         self.api.add_resource(ParticipantsData, '/participants')
         self.api.add_resource(ParticipantProfile, '/participants/<user>/profile')
+        self.api.add_resource(ParticipantsCsv, '/participants/export.csv')
+        self.api.add_resource(ParticipantExport, '/participants/<user>/export')
+        self.api.add_resource(ParticipantImport, '/participants/<user>/import')
         self.api.add_resource(ViewDashboardDate, '/dashboard/<date>')
         self.api.add_resource(ViewUserDetail, '/dashboard/view/<user>/<date>')
         self.api.add_resource(PatientPage, '/patient/<user>')
@@ -216,7 +219,7 @@ class LoginPage(Resource):
             return redirect('/internal_web/patient/' + quote(session['participant_uid']))
 
         return Response(
-            render_template('login.html'),
+            render_template('login.html', participant_login=signup.PARTICIPANT_WEB_LOGIN),
             mimetype='text/html'
         )
 
@@ -279,7 +282,7 @@ class LandingPage(Resource):
             return redirect('/internal_web/patient/' + quote(session['participant_uid']))
         if 'admin_logged_in' not in session:
             return redirect('/internal_web/login')
-        
+        return redirect('/internal_web/dashboard')       # the dashboard is the home page now
         modules = get_available_modules()
         
         return Response(
@@ -838,15 +841,19 @@ class CreateSingleUser(Resource):
             if not uid:
                 return {'success': False, 'error': 'UID is required'}, 400
             
-            email = data.get('email')
+            email = (data.get('email') or '').strip().lower() or None
             study_id = data.get('study_id', 'A1')
+            # Mind Guard links check-ins by email, so two participants must never share one
+            if email and get_db()[get_config().collections.USERS].find_one(
+                    {'email': {'$regex': f'^{re.escape(email)}$', '$options': 'i'}}, {'_id': 1}):
+                return {'success': False, 'error': 'Another participant already has this email'}, 400
             
             # Create participant
             from study_framework_core.core.handlers import create_user
             result = create_user(uid, email, study_id)
-            
+
             if result['success']:
-                return result, 200
+                return without_secrets(result), 200
             else:
                 return result, 400
                 
@@ -881,9 +888,9 @@ class CreateMultipleUsers(Resource):
             # Create multiple participants
             from study_framework_core.core.handlers import create_multiple_users
             result = create_multiple_users(user_prefix, num_users, start_id, email_base, study_id)
-            
+
             if result['success']:
-                return result, 200
+                return without_secrets(result), 200
             else:
                 return result, 400
                 
@@ -964,7 +971,8 @@ class ParticipantsDashboard(Resource):
         if not is_admin():
             return redirect('/internal_web/login')
         db = get_db()
-        return Response(render_template('dashboard.html', suggested_study_id=signup.suggest_study_id(db)),
+        return Response(render_template('dashboard.html', suggested_study_id=signup.suggest_study_id(db),
+                                        participant_login=signup.PARTICIPANT_WEB_LOGIN),
                         mimetype='text/html', headers={'Cache-Control': 'no-cache'})
 
 
@@ -976,6 +984,85 @@ class ParticipantsData(Resource):
         db = get_db()
         return {'success': True, 'rows': participants.overview(db),
                 'suggested_study_id': signup.suggest_study_id(db)}, 200, NO_STORE
+
+
+SECRET_KEYS = {'study_pass', 'garmin_pass', 'file_encryption_key', 'password_hash', 'password', 'access_codes', 'push_token'}
+
+
+def without_secrets(v):
+    """A response with every password and key field taken out, however deep."""
+    if isinstance(v, dict):
+        return {k: without_secrets(x) for k, x in v.items() if k not in SECRET_KEYS}
+    if isinstance(v, list):
+        return [without_secrets(x) for x in v]
+    return v
+
+
+def participants_csv_response():
+    return Response(participant_io.participants_csv(get_db()), mimetype='text/csv', headers={
+        'Content-Disposition': f'attachment; filename=participants_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
+        'Cache-Control': 'no-store'})
+
+
+class ParticipantsCsv(Resource):
+    """GET /internal_web/participants/export.csv: the dashboard list (no passwords or keys)."""
+    def get(self):
+        if not is_admin():
+            return not_logged_in()
+        return participants_csv_response()
+
+
+class ParticipantExport(Resource):
+    """GET /internal_web/participants/<uid>/export[?from=YYYY-MM-DD&to=YYYY-MM-DD&tz=IANA][&beats=1]:
+    one participant's data as a ZIP (see participant_io). Days are the viewer's, both included.
+    Staff can export anyone; a participant signed in on the web, only themself."""
+    def get(self, user):
+        if not may_view(user):
+            return not_logged_in()
+        lo = hi = None
+        f, t = request.args.get('from'), request.args.get('to')
+        if f or t:
+            try:
+                tz = ZoneInfo(request.args.get('tz') or mindguard.TIMEZONE)
+                d0, d1 = datetime.strptime(f, '%Y-%m-%d'), datetime.strptime(t, '%Y-%m-%d')
+            except Exception:
+                return {'success': False, 'error': 'from and to must be YYYY-MM-DD, tz an IANA time zone'}, 400
+            if d1 < d0:
+                return {'success': False, 'error': 'to is before from'}, 400
+            lo = d0.replace(tzinfo=tz).timestamp()
+            hi = (d1 + timedelta(days=1)).replace(tzinfo=tz).timestamp()
+        try:
+            data, name = participant_io.export_bundle(
+                get_db(), user, lo, hi, beats=request.args.get('beats') == '1',
+                by=session.get('admin_username') or session.get('participant_email') or 'unknown',
+                tz=request.args.get('tz') or mindguard.TIMEZONE)
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}, 404
+        logging.info(f"Exported {user} ({len(data)} bytes) for {session.get('admin_username') or session.get('participant_email')}")
+        return Response(data, mimetype='application/zip', headers={
+            'Content-Disposition': f'attachment; filename={name}', 'Cache-Control': 'no-store'})
+
+
+class ParticipantImport(Resource):
+    """POST /internal_web/participants/<uid>/import (multipart: file; apply=1 to write, overwrite=1 to replace
+    profile fields that differ). Without apply it only reports what would change."""
+    def post(self, user):
+        if not is_admin():
+            return not_logged_in()
+        up = request.files.get('file')
+        if not up:
+            return {'success': False, 'error': 'Choose a file exported from Mind Guard.'}, 400
+        db = get_db()
+        try:
+            bundle = participant_io.read_bundle(up.read(participant_io.MAX_IMPORT_BYTES + 1), up.filename or '')
+            plan = participant_io.plan_import(db, user, bundle, overwrite_profile=request.form.get('overwrite') == '1')
+            if request.form.get('apply') != '1':
+                return {'success': True, 'applied': False, 'plan': participant_io.public_plan(plan)}, 200, NO_STORE
+            done = participant_io.apply_import(db, user, plan)
+        except participant_io.ImportError_ as e:
+            return {'success': False, 'error': str(e)}, 400
+        logging.info(f"Imported into {user} by {session.get('admin_username')}: {done['checkins']} {done['questionnaires']}")
+        return {'success': True, 'applied': True, 'plan': done}, 200, NO_STORE
 
 
 class ParticipantProfile(Resource):
@@ -1015,9 +1102,45 @@ class PatientPage(Resource):
             return {"message": f"No participant {user}", "status": 404}, 404
         # no-cache: a cached copy of the page would keep running an older script after a deploy
         people = patient_list(db, config) if is_admin() else [p for p in patient_list(db, config) if p['uid'] == user]
-        return Response(render_template('patient.html', uid=user, initial_date=date, participants=people, admin=is_admin()),
+        who = _participant(db, config, user)          # B is drawn with these, so it has its final size on first paint
+        injury = (who['clinical'] or {}).get('injury_date')
+        try:
+            d = datetime.strptime(injury, '%Y-%m-%d')
+            injury_label = f"{d.strftime('%b')} {d.day}, {d.year}"       # as the page's script writes it (en-US)
+        except (TypeError, ValueError):
+            injury_label = None
+        now = datetime.now(ZoneInfo('UTC'))
+        last_c = datetime.fromisoformat(who['link']['last_checkin'].replace('Z', '+00:00')) if who['link'].get('last_checkin') else None
+        last_w = datetime.fromtimestamp(who['link']['last_watch'], ZoneInfo('UTC')) if who['link'].get('last_watch') else None
+        since = [('fa-comments', ('Last check-in: ' + ago_text(last_c, now)) if last_c else 'No check-in yet', since_tone(last_c, now)),
+                 ('fa-heart-pulse', ('Last watch data: ' + ago_text(last_w, now)) if last_w else 'No watch data yet', since_tone(last_w, now))]
+        ping = who.get('last_phone_contact')
+        pt = datetime.fromtimestamp(ping, ZoneInfo(mindguard.TIMEZONE)) if ping else None
+        ping_label = f"{pt.strftime('%b')} {pt.day}, {pt.strftime('%I:%M %p')}" if pt else 'Never'   # the script then shows the viewer's time
+        return Response(render_template('patient.html', uid=user, initial_date=date, participants=people, admin=is_admin(),
+                                        scales=[(code, name) for code, name, *_ in patient_view.SCALES], p=who,
+                                        injury_label=injury_label, since=since, ping_label=ping_label),
                         mimetype='text/html',
                         headers={'Cache-Control': 'no-cache'})
+
+
+def ago_text(when, now):
+    """'just now', '12 min ago', '5 h ago', '7 days ago': the words the patient page's script uses."""
+    h = (now - when).total_seconds() / 3600
+    if h < 0.05:
+        return 'just now'
+    if h < 1:
+        return f'{max(1, round(h * 60))} min ago'
+    if h < 24:
+        return f'{int(h)} h ago'
+    n = int(h // 24)
+    return '1 day ago' if n == 1 else f'{n} days ago'
+
+
+def since_tone(when, now):
+    if not when:
+        return 'danger'
+    return 'warn' if (now - when).total_seconds() >= 2 * 86400 else 'ok'
 
 
 def patient_list(db, config):
@@ -1129,7 +1252,8 @@ class SignupPage(Resource):
     def get(self):
         if 'admin_logged_in' in session or session.get('participant_uid'):
             return redirect('/internal_web/')
-        return Response(render_template('signup.html', genders=signup.GENDERS), mimetype='text/html')
+        return Response(render_template('signup.html', genders=signup.GENDERS, participant_login=signup.PARTICIPANT_WEB_LOGIN),
+                        mimetype='text/html')
 
 
 class SignupSubmit(Resource):
@@ -1197,17 +1321,8 @@ class ExportUsers(Resource):
             return redirect('/internal_web/login')
         
         try:
-            from study_framework_core.core.handlers import export_users_csv
-            result = export_users_csv()
-            
-            if result['success']:
-                return Response(
-                    result['csv_content'],
-                    mimetype="text/csv",
-                    headers={"Content-Disposition": f"attachment;filename={result['filename']}"}
-                )
-            else:
-                return result, 400
+            # The participant list without the app and Garmin passwords (handlers.export_users_csv wrote them out)
+            return participants_csv_response()
                 
         except Exception as e:
             logging.error(f"Error exporting participants: {e}")

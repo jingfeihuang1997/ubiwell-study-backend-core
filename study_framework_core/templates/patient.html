@@ -8,21 +8,31 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     {% include '_theme.html' %}
     <style>
-        /* The page fills the window under the nav bar and does not scroll itself; only lists inside panes do.
-           A (calendar, patients) runs the full height on the left; B, then C | D over E, on the right. */
-        html { overflow-y: hidden; }
+        /* The page fills the window under the nav bar; only lists inside panes scroll. A (calendar, patients)
+           runs the full height on the left; B across the top; under it the watch (C) over the questionnaires,
+           and the conversation (D) over the check-in results (E), half and half.
+           On desktop the page fits the window. In the stacked layout (iPad and smaller) --pane-min is the least
+           height of D and E: enough to read one and a half turns of the conversation. */
+        /* 352px: the panes' head, tabs and search (about 130px), a check-in heading and 1.5 question-answer turns (90-140px each) */
+        :root { --pane-min: 352px; }
+        html { overflow-y: auto; background: var(--mg-bg); }
         html, body { height: 100%; }
         body { display: flex; flex-direction: column; margin: 0; min-height: 0 !important; }
         body > nav.mg-nav.navbar { margin-bottom: 0 !important; }
         .pt-app {
-            flex: 1; min-height: 0; padding: 12px 16px 16px; display: grid; gap: 12px;
-            grid-template-columns: 264px minmax(0, 1.5fr) minmax(0, 1fr);
-            /* row 2 holds the conversation history (D), rows 3-4 the check-in results (E); C spans 2-3.
-               4:1 gives the conversation about twice the room for messages it had at 1:1. */
-            grid-template-rows: auto minmax(0, 4fr) minmax(0, 1fr) auto;
-            grid-template-areas: "a b b" "a c d" "a c e" "a q e";
+            /* flex-basis 0: the grid gets the window's remaining height, so its rows share that height
+               instead of growing to the length of the conversation */
+            flex: 1 0 0; min-height: 0; padding: 12px 16px 16px; display: grid; gap: 12px;
+            grid-template-columns: 264px minmax(0, 1.4fr) minmax(0, 1fr);
+            /* Desktop fits the window: B takes its content's height (never squeezed), D and E split the rest in half.
+               The minimum pane height applies to the stacked layout below. */
+            grid-template-rows: max-content minmax(0, 1fr) minmax(0, 1fr);
+            grid-template-areas: "a b b" "a c d" "a c e";
         }
-        .pt-a { grid-area: a; } .pt-b { grid-area: b; } .pt-c { grid-area: c; } .pt-d { grid-area: d; } .pt-e { grid-area: e; } .pt-q { grid-area: q; }
+        .pt-a { grid-area: a; } .pt-b { grid-area: b; } .pt-mid { grid-area: c; } .pt-d { grid-area: d; } .pt-e { grid-area: e; }
+        .pt-mid { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
+        .pt-mid > .pt-c { flex: 1; min-height: 0; }
+        .pt-mid > .pt-qn { flex: none; }
 
         /* A: calendar card over the patient list */
         .pt-a { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
@@ -50,14 +60,22 @@
 
         /* B: one compact band, the participant and the facts side by side */
         .pt-b { flex-direction: row; align-items: center; gap: 1.5rem; padding: .75rem 1.125rem; flex-wrap: wrap; }
-        .pt-who { min-width: 220px; display: flex; flex-direction: column; gap: .375rem; }
+        .pt-who { min-width: 220px; max-width: 300px; display: flex; flex-direction: column; gap: .375rem; }
         .pt-name { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
         .pt-name .mg-h1 { font-size: 1.375rem !important; }
         .pt-since { display: flex; gap: .375rem; flex-wrap: wrap; }
+        .pt-actions { display: flex; gap: .3rem; flex-wrap: wrap; }
+        /* Every pane keeps the size it has before the data arrives, so nothing jumps when it loads:
+           B is drawn by the server with its values, the chips have their room from the start,
+           and the questionnaires pane is drawn with its three rows (one line each) before they are filled. */
+        .pt-fact b { display: block; overflow-wrap: anywhere; }        /* values wrap; the server writes them, so B does not jump */
+        .pt-since { min-height: 24px; }
+        #pt-link { display: flex; flex-direction: column; align-items: flex-start; gap: .2rem; min-height: 46px; }
+        #pt-link .mg-chip { margin: 0 !important; }
         .pt-factsets { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .5rem; }
-        .pt-facts { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .375rem 1.25rem; }
+        .pt-facts { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .375rem .9rem; }
         .pt-facts--clinical { padding-top: .5rem; border-top: 1px dashed var(--mg-line); }
-        @media (max-width: 1499.98px) { .pt-facts { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+        /* five facts a row on every desktop width (fewer columns would double B's height); stacked layouts reflow them */
         .pt-missing { font-weight: 400 !important; color: var(--mg-muted) !important; font-size: .78rem !important; }
         .pt-add { appearance: none; border: 0; background: none; padding: 0; margin-left: .3rem; color: var(--mg-accent); font: inherit; font-size: .75rem; font-weight: 600; cursor: pointer; }
         .pt-add:hover { text-decoration: underline; }
@@ -90,8 +108,9 @@
 
         /* Q: questionnaires, under C */
         .mg-metric--hrv { --mod: var(--mg-c-log); } .mg-metric--worn { --mod: var(--mg-c-info); } .mg-metric--phone { --mod: var(--mg-c-battery); }
-        .pt-q .mg-card__body { max-height: 210px; }
-        .pt-q .mg-table td:first-child { color: var(--mg-ink); font-weight: 600; }
+        .pt-qn .mg-card__body { overflow-x: auto; overflow-y: hidden; }
+        .pt-qn .mg-table td:first-child { color: var(--mg-ink); font-weight: 600; }
+        @media (min-width: 700px) { .pt-qn .mg-table td { white-space: nowrap; } .pt-qn .mg-table td:first-child { white-space: normal; } }
 
         /* E footer: reach the family */
         .pt-e .mg-card__foot { justify-content: flex-end; }
@@ -99,7 +118,7 @@
         .pt-dotcell .mg-dot { margin-top: .3rem; }
         .mg-dot--orange { background: var(--mg-warn); }
         .pt-c .mg-metric .mg-value { font-size: 1.35rem; }
-        .pt-c .mg-metric .mg-subtitle { font-size: .72rem; line-height: 1.35; }
+        .pt-c .mg-metric .mg-subtitle { font-size: .72rem; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .pt-tabpanel { display: flex; flex-direction: column; gap: .5rem; flex: 1; min-height: 0; }
         .pt-tabpanel__bar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; flex: none; }
         .pt-tabpanel__bar .mg-nodata-key { margin-left: auto; }
@@ -135,6 +154,7 @@
 
         /* E */
         .pt-e .mg-table td:first-child { color: var(--mg-ink); font-weight: 600; }
+        .pt-e .mg-table > :not(caption) > * > * { padding-left: .45rem !important; padding-right: .45rem !important; }   /* fits the half-width pane */
         .pt-q { font-weight: 400; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .pt-detail td { background: var(--mg-panel-2); font-size: .75rem; }
         .pt-qa-entry + .pt-qa-entry { margin-top: .625rem; padding-top: .625rem; border-top: 1px solid var(--mg-line); }
@@ -147,18 +167,66 @@
         .sev-mid { color: var(--mg-warn); font-weight: 700; }
         .pt-none { color: var(--mg-muted); font-weight: 400; }
 
-        /* Narrower windows: the page scrolls, the panes stack */
-        @media (max-width: 1279.98px) {
-            html { overflow-y: scroll; }
-            html, body { height: auto; }
-            .pt-app { grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: auto; grid-template-areas: "a b" "a c" "a q" "a d" "a e"; }
-            .pt-c { height: 680px; } .pt-d { height: 900px; } .pt-e { height: 520px; }
-            .pt-a { align-self: start; position: sticky; top: 12px; max-height: calc(100vh - 24px); }
+        /* Short desktop windows (a 13-14" laptop): the same layout, packed tighter, so everything still fits the window */
+        @media (min-width: 1400px) and (max-height: 960px) {
+            .pt-app { padding: 10px 14px 12px; gap: 10px; }
+            .pt-mid { gap: 10px; }
+            .pt-b { padding: .5rem 1rem; gap: 1rem; }
+            .pt-who { gap: .25rem; }
+            .pt-factsets { gap: .3rem; }
+            .pt-facts { row-gap: .2rem; }
+            .pt-facts--clinical { padding-top: .3rem; }
+            .pt-fact .mg-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 0; }
+            .pt-name .mg-h1 { font-size: 1.2rem !important; }
+            .pt-c .mg-card__head, .pt-d .mg-card__head, .pt-e .mg-card__head, .pt-qn .mg-card__head { padding-top: .6rem; padding-bottom: .45rem; }
+            .pt-c .mg-card__body { gap: .4rem; }
+            .pt-c .mg-metric { padding: .4rem .6rem; }
+            .pt-c .mg-metric .mg-value { font-size: 1.1rem; margin-top: .1rem; }
+            .pt-c .mg-metric .mg-subtitle { -webkit-line-clamp: 1; }
+            .pt-chart { min-height: 110px; }
+            .pt-tabpanel { gap: .3rem; }
+            .pt-qn .mg-table > :not(caption) > * > * { padding-top: .32rem !important; padding-bottom: .32rem !important; }
+            .pt-calcard .mg-cal__day { min-height: 26px; }
         }
-        @media (max-width: 899.98px) {
-            .pt-app { grid-template-columns: 1fr; grid-template-areas: "b" "a" "c" "q" "d" "e"; padding: 10px 16px; }
-            .pt-a { position: static; max-height: none; }
-            .pt-plist { max-height: 260px; }
+        @media (min-width: 1400px) and (max-height: 820px) { .pt-chart { min-height: 88px; } }
+        /* iPad (the 12.9-inch is 1366px wide in landscape), small laptops and smaller: every pane in one column, in reading order */
+        @media (max-width: 1399.98px) {
+            html, body { height: auto; }
+            .pt-app { flex: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "b" "a" "c" "d" "e"; padding: 12px 16px; }
+            .pt-a { flex-direction: row; align-items: stretch; }
+            .pt-a > .pt-calcard { width: 300px; }
+            .pt-a > .pt-plist { flex: 1; max-height: 420px; }
+            .pt-mid > .pt-c { flex: none; height: 640px; }
+            .pt-d, .pt-e { height: clamp(var(--pane-min), 70vh, 640px); }
+            .pt-who { max-width: none; }
+            .pt-facts { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+        }
+        @media (max-width: 699.98px) {
+            .pt-app { padding: 10px 16px; gap: 10px; }
+            .pt-a { flex-direction: column; }
+            .pt-a > .pt-calcard { width: auto; }
+            .pt-a > .pt-plist { max-height: 260px; }
+            .pt-b { gap: .75rem; padding: .75rem .875rem; }
+            .pt-who { min-width: 0; }
+            .pt-facts { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+            .pt-mid > .pt-c { height: 620px; }
+            /* the card heads get a second line for their controls instead of squeezing the title */
+            .pt-d .mg-card__head, .pt-c .mg-card__head { flex-wrap: wrap; }
+            .pt-d .mg-card__tools, .pt-c .mg-card__tools { flex-wrap: wrap; margin-left: 0; }
+            .pt-tabs-row { flex-wrap: wrap; }
+            .pt-tabs-row .mg-jump { margin-left: 0; width: 100%; }
+            .pt-bubble { max-width: 94%; }
+            .pt-c .mg-source > button, .pt-qn .mg-source > button { font-size: 0; gap: 0; }       /* the info icon only */
+            .pt-c .mg-source > button i, .pt-qn .mg-source > button i { font-size: .85rem; }
+            .pt-qn .mg-card__head, .pt-e .mg-card__head { flex-wrap: wrap; }
+            .pt-d.pt-expanded { inset: 0; border-radius: 0; }
+            /* check-in results fit a phone: no Days column (the answers list it), the answers button as an icon */
+            .pt-e .mg-table thead th:nth-child(4), .pt-e .mg-table tbody > tr:not(.pt-detail) > td:nth-child(4) { display: none; }
+            .pt-e .mg-table td .mg-btn--ghost { font-size: 0; padding: .3rem .4rem !important; }
+            .pt-e .mg-table td .mg-btn--ghost::before { content: "\f0ca"; font: 900 .8rem "Font Awesome 6 Free"; }
+            .pt-e .pt-q { -webkit-line-clamp: 1; }
+            .pt-e .mg-table thead th:nth-child(5) { font-size: 0; }      /* the arrow explains itself */
+            .pt-e .mg-table th, .pt-e .mg-table td { padding-left: .3rem !important; padding-right: .3rem !important; }
         }
     </style>
 </head>
@@ -206,28 +274,38 @@
         <!-- B: the participant -->
         <section class="mg-card mg-card--info pt-b" aria-label="Participant">
             <div class="pt-who">
-                <div class="pt-name"><h1 class="mg-h1" id="pt-name">{{ uid }}</h1><span class="mg-subtitle" id="pt-demo"></span></div>
-                <div class="pt-since" id="pt-since"></div>
-                {% if admin %}<div><button type="button" class="mg-btn mg-btn--sm" id="pt-edit"><i class="fas fa-pen"></i>Edit profile and clinical info</button></div>{% endif %}
+                {%- set demo = [(p.age ~ ' y.o.') if p.age else '', (p.gender | replace('_', ' ')) if p.gender else ''] | select | join(' / ') %}
+                <div class="pt-name"><h1 class="mg-h1" id="pt-name">{{ p.name or uid }}</h1><span class="mg-subtitle" id="pt-demo">{{ demo or 'No profile' }}</span></div>
+                <div class="pt-since" id="pt-since">{% for icon, text, tone in since %}<span class="mg-chip mg-chip--{{ tone }}"><i class="fas {{ icon }}"></i>{{ text }}</span>{% endfor %}</div>
+                <div class="pt-actions">
+                    {% if admin %}<button type="button" class="mg-btn mg-btn--sm" id="pt-edit" title="Edit profile and clinical info"><i class="fas fa-pen"></i>Edit</button>{% endif %}
+                    <button type="button" class="mg-btn mg-btn--sm" id="pt-export" title="Download this participant's data as a ZIP"><i class="fas fa-download"></i>Export</button>
+                    {% if admin %}<button type="button" class="mg-btn mg-btn--sm" id="pt-import" title="Import a Mind Guard participant file"><i class="fas fa-upload"></i>Import</button>{% endif %}
+                </div>
             </div>
             <div class="pt-factsets">
                 <div class="pt-facts">
                     <div class="pt-fact"><span class="mg-label">Participant ID</span><b id="pt-uid">{{ uid }}</b></div>
-                    <div class="pt-fact"><span class="mg-label">Email (Alexa and watch)</span><b id="pt-email">…</b></div>
-                    <div class="pt-fact"><span class="mg-label">Watch login code</span><b id="pt-code">…</b></div>
-                    <div class="pt-fact"><span class="mg-label">Last phone contact</span><b id="pt-ping">…</b></div>
-                    <div class="pt-fact"><span class="mg-label">Setup</span><span id="pt-link"></span></div>
+                    <div class="pt-fact"><span class="mg-label">Email (Alexa and watch)</span><b id="pt-email">{% if p.email %}{{ p.email.split('@')[0] }}@<wbr>{{ p.email.split('@', 1)[1] if '@' in p.email else '' }}{% else %}Not set{% endif %}</b></div>
+                    <div class="pt-fact"><span class="mg-label">Watch login code</span><b id="pt-code">{{ p.uid_code or 'None' }}</b></div>
+                    <div class="pt-fact"><span class="mg-label">Last phone contact</span><b id="pt-ping">{{ ping_label }}</b></div>
+                    {%- set alexa = {'connected': ('ok', 'Mind Guard connected'), 'waiting': ('warn', 'Mind Guard: no check-in yet'), 'no_email': ('danger', 'Mind Guard: no email')}.get(p.link.alexa, ('', 'Mind Guard: unknown')) %}
+                    {%- set watch = {'receiving': ('ok', 'Watch receiving'), 'stale': ('warn', 'Watch: nothing in 3 days'), 'app_only': ('warn', 'App signed in, no watch data'), 'not_set_up': ('danger', 'Watch not set up')}.get(p.link.watch, ('', 'Watch: unknown')) %}
+                    <div class="pt-fact"><span class="mg-label">Setup</span><span id="pt-link">{% for k, t in [alexa, watch] %}<span class="mg-chip{{ ' mg-chip--' ~ k if k }}">{{ t }}</span>{% endfor %}</span></div>
                 </div>
                 <div class="pt-facts pt-facts--clinical">
-                    <div class="pt-fact"><span class="mg-label">Date of injury</span><b id="pt-injury">…</b></div>
-                    <div class="pt-fact"><span class="mg-label">Phase in concussion</span><b id="pt-phase">…</b></div>
-                    <div class="pt-fact"><span class="mg-label">Psychiatric history</span><b id="pt-psych">…</b></div>
-                    <div class="pt-fact"><span class="mg-label">Mental health prescriptions</span><b id="pt-mh">…</b></div>
-                    <div class="pt-fact"><span class="mg-label">Phone (patient / parent)</span><b id="pt-phone">…</b></div>
+                    {%- set C = p.clinical %}
+                    {%- macro missing(what) %}<span class="pt-missing">{{ what }}</span>{% if admin %}<button type="button" class="pt-add" data-focus="clinical">Add</button>{% endif %}{% endmacro %}
+                    <div class="pt-fact"><span class="mg-label">Date of injury</span><b id="pt-injury">{{ injury_label or missing('No date of injury entered yet') }}</b></div>
+                    <div class="pt-fact"><span class="mg-label">Phase in concussion</span><b id="pt-phase">{% if p.phase %}{{ p.phase.name }} <span class="pt-missing">({{ p.phase.days }} day{{ '' if p.phase.days == 1 else 's' }})</span>{% else %}<span class="pt-missing">Needs the date of injury</span>{% endif %}</b></div>
+                    <div class="pt-fact"><span class="mg-label">Psychiatric history</span><b id="pt-psych">{% if C.psych_history %}{{ {'yes': 'Yes', 'no': 'No', 'unknown': 'Unknown'}[C.psych_history] }}{% if C.psych_note %} <span class="pt-missing">{{ C.psych_note }}</span>{% endif %}{% else %}{{ missing('Not entered yet') }}{% endif %}</b></div>
+                    <div class="pt-fact"><span class="mg-label">Mental health prescriptions</span><b id="pt-mh">{% if C.mh_prescriptions is not none %}{{ C.mh_prescriptions }}{% if C.mh_prescription_names %} <span class="pt-missing">{{ C.mh_prescription_names }}</span>{% endif %}{% else %}{{ missing('Not entered yet') }}{% endif %}</b></div>
+                    <div class="pt-fact"><span class="mg-label">Phone (patient / parent)</span><b id="pt-phone">{% if p.phone or p.parent_phone %}{{ p.phone or '–' }} / {{ p.parent_phone or '–' }}{% else %}<span class="pt-missing">Not collected in this study yet</span>{% endif %}</b></div>
                 </div>
             </div>
         </section>
 
+        <div class="pt-mid">
         <!-- C: watch -->
         <section class="mg-card mg-card--data pt-c" aria-label="Sleep and physical activity">
             <div class="mg-card__head">
@@ -251,7 +329,7 @@
         </section>
 
         <!-- Q: questionnaires the patient fills in at home -->
-        <section class="mg-card mg-card--results pt-q" aria-label="Questionnaire results">
+        <section class="mg-card mg-card--results pt-qn" aria-label="Questionnaire results">
             <div class="mg-card__head">
                 <h2 class="mg-title"><i class="fas fa-file-medical mg-card__icon"></i>Questionnaire results</h2>
                 <div class="mg-card__tools">
@@ -263,8 +341,14 @@
                             yet</strong>, so they show as not collected. Mind Guard is planned to ask the PHQ-9 and GAD-7 by voice next; results will show here.</div></div>
                 </div>
             </div>
-            <div class="mg-card__body mg-card__body--flush" id="q-table"></div>
+            <div class="mg-card__body mg-card__body--flush" id="q-table">
+                {# drawn with its three rows before the data comes, so the pane has its final height from the start #}
+                <table class="mg-table"><thead><tr><th>Name of scale</th><th>Score</th><th>Meaning</th><th></th></tr></thead><tbody>
+                    {% for code, name in scales %}<tr><td>{{ name }} <span class="mg-meta">({{ code }})</span></td><td colspan="3"><span class="pt-none">…</span></td></tr>{% endfor %}
+                </tbody></table>
+            </div>
         </section>
+        </div>
 
         <!-- D: Mind Guard log -->
         <section class="mg-card mg-card--log pt-d" aria-label="Conversation history">
@@ -318,6 +402,7 @@
     <div class="pt-menu" id="c-menu" role="menu" hidden></div>
     <div class="pt-backdrop" id="d-backdrop" hidden></div>
     {% if admin %}{% include '_participant_form.html' %}{% endif %}
+    {% include '_participant_io.html' %}
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
@@ -432,7 +517,7 @@
         function renderInfo(p) {
             $('pt-name').textContent = p.name || p.uid;
             $('pt-demo').textContent = [p.age ? p.age + ' y.o.' : '', p.gender ? p.gender.replace(/_/g, ' ') : ''].filter(Boolean).join(' / ') || 'No profile';
-            $('pt-email').textContent = p.email || 'Not set';
+            $('pt-email').innerHTML = p.email ? esc(p.email).replace('@', '@<wbr>') : 'Not set';      // may wrap after the @
             $('pt-code').textContent = p.uid_code || 'None';
             $('pt-ping').textContent = p.last_phone_contact ? new Date(p.last_phone_contact * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never';
             const L = p.link || {};
@@ -443,7 +528,7 @@
             const C = p.clinical || {};
             state.participant = p;
             const missing = (what, focus) => '<span class="pt-missing">' + esc(what) + '</span>' + (ADMIN ? '<button type="button" class="pt-add" data-focus="' + focus + '">Add</button>' : '');
-            $('pt-injury').innerHTML = C.injury_date ? esc(parseYmd(C.injury_date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })) : missing('No date of injury entered yet', 'clinical');
+            $('pt-injury').innerHTML = C.injury_date ? esc(parseYmd(C.injury_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })) : missing('No date of injury entered yet', 'clinical');
             $('pt-phase').innerHTML = p.phase ? esc(p.phase.name) + ' <span class="pt-missing">(' + p.phase.days + ' day' + (p.phase.days === 1 ? '' : 's') + ')</span>'
                 : '<span class="pt-missing">Needs the date of injury</span>';
             $('pt-psych').innerHTML = C.psych_history ? esc({ yes: 'Yes', no: 'No', unknown: 'Unknown' }[C.psych_history]) + (C.psych_note ? ' <span class="pt-missing">' + esc(C.psych_note) + '</span>' : '')
@@ -459,6 +544,15 @@
                                 onSaved: () => { state.cache = {}; renderAll(); } });
         }
         if ($('pt-edit')) $('pt-edit').onclick = () => editProfile('profile');
+        document.querySelectorAll('.pt-add[data-focus]').forEach((b) => (b.onclick = () => editProfile(b.dataset.focus)));
+        // Export: all data, what panel C shows now, or chosen days. Import (staff): a file exported from Mind Guard.
+        $('pt-export').onclick = () => {
+            const r = rangeOf(state.cRange, state.date), last = addDays(ymd(r.end), -1);
+            mgExport({ uid, name: (state.participant || {}).name,
+                       pageRange: { from: ymd(r.start), to: last, label: rangeText(state.cRange, state.date) } });
+        };
+        if ($('pt-import')) $('pt-import').onclick = () => mgImport({ uid, name: (state.participant || {}).name,
+                                                                       onDone: () => { state.cache = {}; state.calCache = {}; renderAll(); } });
         function renderSince(lastCheckin, lastWatch) {
             const c = lastCheckin ? new Date(lastCheckin) : null, w = lastWatch ? new Date(lastWatch * 1000) : null;
             const tone = (d) => !d ? 'danger' : (Date.now() - d) / 86400000 >= 2 ? 'warn' : 'ok';
@@ -677,10 +771,13 @@
             };
         }
         function renderTabs() {
-            const base4 = [['sleep', 'Sleep (estimated)', '--mg-c-sleep'], ['heart', 'Heart rate &amp; stress', '--mg-c-heart'], ['breath', 'Breathing', '--mg-c-breath'],
-                           ['activity', 'Physical activity', '--mg-c-steps'], ['compliance', 'Recommendation compliance', '--mg-c-results']];
-            const tabs = base4.concat(extrasShown().map((k) => [k, esc(EXTRA_TAB[k][0]), EXTRA_TAB[k][1]]));
-            $('c-tabs').innerHTML = tabs.map(([k, label, color]) => '<button class="mg-tab" role="tab" data-tab="' + k + '" style="--mod: var(' + color + ')" aria-selected="' + (k === state.tab) + '">' + label + '</button>').join('');
+            // short names so the tabs stay on one row in a narrow pane; the full name shows on hover
+            const base4 = [['sleep', 'Sleep (est.)', '--mg-c-sleep', 'Sleep, estimated from the watch'], ['heart', 'Heart &amp; stress', '--mg-c-heart', 'Heart rate, stress and Body Battery'],
+                           ['breath', 'Breathing', '--mg-c-breath', 'Breathing rate'], ['activity', 'Activity', '--mg-c-steps', 'Physical activity (steps)'],
+                           ['compliance', 'Compliance', '--mg-c-results', 'Recommendation compliance']];
+            const tabs = base4.concat(extrasShown().map((k) => [k, esc(EXTRA_TAB[k][0]), EXTRA_TAB[k][1], EXTRA_TAB[k][0]]));
+            $('c-tabs').innerHTML = tabs.map(([k, label, color, full]) => '<button class="mg-tab" role="tab" data-tab="' + k + '" style="--mod: var(' + color + ')" title="' + esc(full) +
+                '" aria-selected="' + (k === state.tab) + '">' + label + '</button>').join('');
             $('c-tabs').querySelectorAll('.mg-tab').forEach((b) => (b.onclick = () => {
                 state.tab = b.dataset.tab;
                 if (state.lastC) { renderTabs(); renderTab(state.lastC.d, state.lastC.days, state.lastC.nights); }
@@ -698,7 +795,7 @@
                 const L = q.latest, P = q.previous;
                 if (!L) return '<tr><td>' + esc(q.name) + ' <span class="mg-meta">(' + esc(q.scale) + ')</span></td><td colspan="3"><span class="pt-none">Not collected yet</span></td></tr>';
                 return '<tr><td>' + esc(q.name) + ' <span class="mg-meta">(' + esc(q.scale) + ')</span></td><td class="mg-num">' + (P && P.total != null ? esc(P.total) + ' → ' : '') +
-                    '<b>' + esc(L.total == null ? '?' : L.total) + '</b> / ' + q.max + arrow(P && P.total, L.total) + '<div class="mg-meta">' + esc(L.at ? dayLabel(new Date(L.at)) : '') + '</div></td>' +
+                    '<b>' + esc(L.total == null ? '?' : L.total) + '</b> / ' + q.max + arrow(P && P.total, L.total) + (L.at ? ' <span class="mg-meta">· ' + esc(dayLabel(new Date(L.at))) + '</span>' : '') + '</td>' +
                     '<td>' + (L.band ? esc(L.band + ' ' + q.what) : '<span class="pt-none">No cut-off bands</span>') + '</td>' +
                     '<td style="text-align:right">' + (L.items.length ? '<button class="mg-btn mg-btn--ghost mg-btn--sm" data-q="' + i + '">Show details</button>' : '') + '</td></tr>' +
                     (L.items.length ? '<tr class="pt-detail" data-qrow="' + i + '" hidden><td colspan="4"><dl class="pt-qa">' + L.items.map((it) =>

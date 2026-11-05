@@ -80,7 +80,7 @@ def todos(user, link, code, has_login):
         out.append({'who': 'participant', 'key': 'watch', 'text': 'Pair the Garmin watch in the UbiWell Connect app'})
     elif link['watch'] == 'stale':
         out.append({'who': 'participant', 'key': 'sync', 'text': f'Wear the watch and open the app to sync (nothing for {STALE_DAYS}+ days)'})
-    if not has_login:
+    if not has_login and signup.PARTICIPANT_WEB_LOGIN:
         out.append({'who': 'participant', 'key': 'login', 'optional': True,
                     'text': f"Optional: sign up on this site with {user.get('email') or 'their email'} to see their own data"})
     return out
@@ -244,6 +244,8 @@ def update_profile(db, uid, data):
 
 def verify_participant_login(db, email, password):
     """A participant's web login: their email and the password they chose when signing up."""
+    if not signup.PARTICIPANT_WEB_LOGIN:
+        return None                     # off during the study: only staff sign in
     email = str(email or '').strip().lower()
     d = db[LOGINS].find_one({'email': email})
     if not d or not signup.check_salted(str(password or ''), d.get('password_hash')):

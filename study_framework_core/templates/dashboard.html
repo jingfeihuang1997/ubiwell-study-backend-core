@@ -30,14 +30,16 @@
         .db-list li.db-optional { color: var(--mg-muted); }
         .db-none { color: var(--mg-muted); font-size: .78rem; }
         .db-done { color: var(--mg-ok); font-size: .78rem; font-weight: 600; }
-        .db-actions { display: flex; gap: .3rem; justify-content: flex-end; flex-wrap: wrap; }
+        .db-actions { display: flex; gap: .3rem; justify-content: flex-end; flex-wrap: nowrap; }
+        .db-actions .mg-icon-btn { width: 28px; height: 28px; flex: none; }
         .db-row--request td { background: color-mix(in srgb, var(--mg-warn) 6%, transparent); }
         .db-tabs { margin-bottom: .75rem; }
         .db-result { font-size: .8125rem; }
         .db-result code { font-size: .85rem; font-weight: 700; }
         .mg-dot--orange { background: var(--mg-warn); }
         @media (max-width: 899.98px) { .db-table thead { display: none; } .db-table, .db-table tbody, .db-table tr, .db-table td { display: block; width: 100%; }
-            .db-table tr { border-bottom: 1px solid var(--mg-line); } .db-table td { border: 0 !important; padding: .35rem .75rem !important; } .db-actions { justify-content: flex-start; } }
+            .db-table tr { border-bottom: 1px solid var(--mg-line); padding: .4rem 0; } .db-table td { border: 0 !important; padding: .35rem .75rem !important; } .db-actions { justify-content: flex-start; }
+            .db-table td[data-label]::before { content: attr(data-label); display: block; font-size: .65rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--mg-muted); margin-bottom: .2rem; } }
     </style>
 </head>
 <body>
@@ -57,7 +59,7 @@
                     <div class="db-filters" id="db-filters" role="group" aria-label="Show"></div>
                     <input class="mg-input mg-input--sm db-search" id="db-search" type="search" placeholder="Search name, ID or email" aria-label="Search participants">
                     <button class="mg-btn mg-btn--sm" id="db-refresh" title="Load the list again"><i class="fas fa-rotate"></i>Refresh</button>
-                    <button class="mg-btn mg-btn--sm" id="db-export" title="Download every participant as CSV"><i class="fas fa-file-export"></i>Export CSV</button>
+                    <button class="mg-btn mg-btn--sm" id="db-export" title="Download this list as CSV (no passwords)"><i class="fas fa-file-export"></i>Export list</button>
                 </div>
             </div>
             <div class="mg-card__body mg-card__body--flush">
@@ -129,6 +131,7 @@
     </dialog>
 
     {% include '_participant_form.html' %}
+    {% include '_participant_io.html' %}
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -144,6 +147,7 @@
         };
         const tone = (d) => !d ? 'danger' : (Date.now() - d) / 86400000 >= 2 ? 'warn' : 'ok';
         const state = { rows: [], filter: 'all', q: '', study: {{ suggested_study_id | tojson }} };
+        const PLOGIN = {{ 'true' if participant_login else 'false' }};   // participants' own web login (off during the study)
 
         async function load() {
             try {
@@ -182,17 +186,19 @@
             return '<tr data-uid="' + esc(r.uid) + '"><td><div class="db-name"><a href="/internal_web/patient/' + encodeURIComponent(r.uid) + '">' + esc(r.name || r.uid) + '</a></div>' +
                 '<div class="db-sub">' + esc([demo(r), r.name ? r.uid : ''].filter(Boolean).join(' · ') || 'No profile yet') + '</div>' +
                 '<div class="db-sub">' + (r.email ? esc(r.email) : '<span style="color:var(--mg-warn)">No email</span>') + ' · code ' + esc(r.uid_code || 'none') + (r.has_login ? ' · <i class="fas fa-key" title="Has a web login"></i>' : '') + '</div></td>' +
-                '<td><div class="db-chips"><span class="mg-chip mg-chip--' + tone(c) + '" title="Last Mind Guard check-in"><i class="fas fa-comments"></i>' + (c ? esc(ago(c)) : 'No check-in yet') + '</span>' +
+                '<td data-label="Last data"><div class="db-chips"><span class="mg-chip mg-chip--' + tone(c) + '" title="Last Mind Guard check-in"><i class="fas fa-comments"></i>' + (c ? esc(ago(c)) : 'No check-in yet') + '</span>' +
                 '<span class="mg-chip mg-chip--' + tone(w) + '" title="Last watch data"><i class="fas fa-heart-pulse"></i>' + (w ? esc(ago(w)) : 'No watch data yet') + '</span></div></td>' +
-                '<td>' + warn + '</td><td>' + todoList(r.todos) + '</td>' +
+                '<td data-label="Warnings, last 7 days">' + warn + '</td><td data-label="To do">' + todoList(r.todos) + '</td>' +
                 '<td><div class="db-actions"><a class="mg-btn mg-btn--sm" href="/internal_web/patient/' + encodeURIComponent(r.uid) + '">Open</a>' +
-                '<button class="mg-btn mg-btn--sm" data-edit="' + esc(r.uid) + '">Edit</button></div></td></tr>';
+                '<button class="mg-btn mg-btn--sm" data-edit="' + esc(r.uid) + '">Edit</button>' +
+                '<button class="mg-icon-btn" data-export="' + esc(r.uid) + '" title="Export this participant\'s data" aria-label="Export data of ' + esc(r.name || r.uid) + '"><i class="fas fa-download"></i></button>' +
+                '<button class="mg-icon-btn" data-import="' + esc(r.uid) + '" title="Import data into this participant" aria-label="Import data into ' + esc(r.name || r.uid) + '"><i class="fas fa-upload"></i></button></div></td></tr>';
         }
         function requestRow(r) {
             const what = r.kind === 'staff' ? 'Study staff' + (r.role ? ' (' + r.role + ')' : '') + ', username ' + r.username
                 : r.claim_uid ? 'Already participant ' + r.claim_uid + ': asks for a web login' : 'New participant' + (demo(r) ? ' · ' + demo(r) : '');
             return '<tr class="db-row--request" data-req="' + esc(r.id) + '"><td><div class="db-name">' + esc(r.name) + '</div><div class="db-sub">' + esc(what) + '</div><div class="db-sub">' + esc(r.email) + '</div></td>' +
-                '<td><span class="mg-chip mg-chip--warn"><i class="fas fa-hourglass-half"></i>Waiting for review</span><div class="db-sub" style="margin-top:.3rem">Asked ' +
+                '<td data-label="Status"><span class="mg-chip mg-chip--warn"><i class="fas fa-hourglass-half"></i>Waiting for review</span><div class="db-sub" style="margin-top:.3rem">Asked ' +
                 esc(r.created_at ? ago(new Date(r.created_at)) : '') + '</div></td><td><span class="db-none">None</span></td><td>' + todoList(r.todos) + '</td>' +
                 '<td><div class="db-actions"><button class="mg-btn mg-btn--sm mg-btn--primary" data-approve="' + esc(r.id) + '">Approve</button>' +
                 '<button class="mg-btn mg-btn--sm" data-reject="' + esc(r.id) + '">Reject</button></div></td></tr>';
@@ -201,6 +207,14 @@
             document.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => {
                 const r = state.rows.find((x) => x.uid === b.dataset.edit);
                 mgEditParticipant({ uid: r.uid, email: r.email, profile: r.profile, focus: firstTodo(r), onSaved: load });
+            }));
+            document.querySelectorAll('[data-export]').forEach((b) => (b.onclick = () => {
+                const r = state.rows.find((x) => x.uid === b.dataset.export);
+                mgExport({ uid: r.uid, name: r.name, pageRange: null });
+            }));
+            document.querySelectorAll('[data-import]').forEach((b) => (b.onclick = () => {
+                const r = state.rows.find((x) => x.uid === b.dataset.import);
+                mgImport({ uid: r.uid, name: r.name, onDone: load });
             }));
             document.querySelectorAll('[data-approve]').forEach((b) => (b.onclick = () => openApprove(state.rows.find((x) => x.id === b.dataset.approve))));
             document.querySelectorAll('[data-reject]').forEach((b) => (b.onclick = async () => {
@@ -230,7 +244,7 @@
             $('db-approve-who').innerHTML = esc(r.name) + ' · ' + esc(r.email) + '<br><span class="mg-meta">' + (r.kind === 'staff'
                 ? 'Gets a study-team login (username ' + esc(r.username) + '); they see every participant.'
                 : r.claim_uid ? 'Already participant ' + esc(r.claim_uid) + '. Approving gives them a web login that shows only their own data.'
-                : 'Creates the participant and their watch login code, and a web login that shows only their own data.') + '</span>';
+                : 'Creates the participant and their watch login code' + (PLOGIN ? ', and a web login that shows only their own data.' : '.')) + '</span>';
             if (isNew) { $('db-ap-uid').value = suggestUid(r.name); $('db-ap-study').value = state.study; }
             $('db-ap-error').hidden = true;
             $('db-approve').showModal();
@@ -299,7 +313,7 @@
 
         $('db-search').addEventListener('input', (e) => { state.q = e.target.value.trim(); render(); });
         $('db-refresh').onclick = load;
-        $('db-export').onclick = () => { location.href = '/internal_web/user-management/export'; };
+        $('db-export').onclick = () => { location.href = '/internal_web/participants/export.csv'; };   // the list as shown; no passwords
         load();
     })();
     </script>

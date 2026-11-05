@@ -1,0 +1,152 @@
+{# Export one participant's data (ZIP) and import a participant file. Used on the dashboard and the patient page:
+     mgExport({uid, name, pageRange: {from, to, label} | null})
+     mgImport({uid, name, onDone})            (study staff only) #}
+<dialog class="mg-dialog mg-io" id="mgExportDialog" aria-labelledby="mgExportTitle">
+    <form method="dialog" id="mgExportForm">
+        <div class="mg-dialog__body">
+            <h2 class="mg-title" id="mgExportTitle" style="font-size:1.05rem">Export data</h2>
+            <p class="mg-meta" id="mgExportWho" style="margin:.15rem 0 .75rem"></p>
+            <div class="mg-label" style="margin-bottom:.35rem">Range</div>
+            <label class="mg-io__opt"><input type="radio" name="range" value="all" checked> All data</label>
+            <label class="mg-io__opt" id="mgExportPageOpt"><input type="radio" name="range" value="page"> <span id="mgExportPageLabel"></span></label>
+            <label class="mg-io__opt"><input type="radio" name="range" value="custom"> From
+                <input class="mg-input mg-input--sm" type="date" id="mgExportFrom"> to <input class="mg-input mg-input--sm" type="date" id="mgExportTo"></label>
+            <label class="mg-check" style="margin:.6rem 0 .2rem"><input type="checkbox" id="mgExportBeats"> Include beat-to-beat intervals <span class="mg-meta">(large: about 1,000 rows an hour of wear)</span></label>
+            <div class="mg-io__note">
+                <strong>The ZIP holds:</strong> <code>participant.json</code> (profile and clinical info, every check-in with its questions and
+                answers, questionnaires, sleep estimates; the file Import reads), <code>checkins.csv</code> (one row per answer),
+                <code>results.csv</code>, <code>sleep_estimates.csv</code>, raw watch and phone readings as CSV, and a README explaining every column.
+                Times are UTC. <strong>Never included:</strong> app and Garmin passwords, encryption keys, web login details.
+            </div>
+            <p class="mg-error" id="mgExportError" hidden></p>
+        </div>
+        <div class="mg-dialog__foot">
+            <button type="button" class="mg-btn" id="mgExportCancel">Cancel</button>
+            <button type="submit" class="mg-btn mg-btn--primary"><i class="fas fa-download"></i>Download ZIP</button>
+        </div>
+    </form>
+</dialog>
+
+<dialog class="mg-dialog mg-io" id="mgImportDialog" aria-labelledby="mgImportTitle">
+    <form method="dialog" id="mgImportForm">
+        <div class="mg-dialog__body">
+            <h2 class="mg-title" id="mgImportTitle" style="font-size:1.05rem">Import data</h2>
+            <p class="mg-meta" id="mgImportWho" style="margin:.15rem 0 .75rem"></p>
+            <div class="mg-field"><label for="mgImportFile">File exported from Mind Guard</label>
+                <input class="mg-input" type="file" id="mgImportFile" accept=".zip,.json,application/zip,application/json">
+                <span class="mg-hint">The ZIP from Export, or its participant.json. Adds profile fields, check-ins and questionnaires;
+                    a check-in already here is replaced only by a newer copy of it. Watch data is not imported: it only comes from the app.</span></div>
+            <label class="mg-check"><input type="checkbox" id="mgImportOverwrite"> Also replace profile fields that are different here</label>
+            <div id="mgImportPlan" class="mg-io__plan" hidden></div>
+            <p class="mg-error" id="mgImportError" hidden></p>
+        </div>
+        <div class="mg-dialog__foot">
+            <button type="button" class="mg-btn" id="mgImportCancel">Cancel</button>
+            <button type="button" class="mg-btn" id="mgImportCheck">Check file</button>
+            <button type="submit" class="mg-btn mg-btn--primary" id="mgImportGo" disabled>Import</button>
+        </div>
+    </form>
+</dialog>
+<style>
+    .mg-io { width: min(560px, calc(100vw - 32px)); }
+    .mg-io__opt { display: flex; align-items: center; gap: .4rem; font-size: .8125rem; color: var(--mg-ink-2); margin: .25rem 0; flex-wrap: wrap; }
+    .mg-io__opt input[type="radio"] { accent-color: var(--mg-accent); }
+    .mg-io__note { margin-top: .75rem; font-size: .75rem; color: var(--mg-muted); line-height: 1.5; background: var(--mg-panel-2); border-radius: 8px; padding: .55rem .7rem; }
+    .mg-io__note code { font-size: .72rem; }
+    .mg-io__plan { margin-top: .75rem; font-size: .8125rem; border: 1px solid var(--mg-line); border-radius: 8px; padding: .6rem .75rem; }
+    .mg-io__plan ul { margin: .2rem 0 .4rem; padding-left: 1.1rem; }
+    .mg-io__plan .mg-label { display: block; margin-top: .35rem; }
+    .mg-io__warn { color: var(--mg-warn); font-weight: 600; }
+</style>
+<script>
+(function () {
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let ex = null, im = null;
+
+    window.mgExport = function (opts) {
+        ex = opts;
+        $('mgExportWho').textContent = (opts.name ? opts.name + ' · ' : '') + 'Participant ID ' + opts.uid;
+        $('mgExportPageOpt').hidden = !opts.pageRange;
+        if (opts.pageRange) $('mgExportPageLabel').textContent = 'What this page shows: ' + opts.pageRange.label;
+        const today = new Date(), iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        $('mgExportTo').value = iso(today); $('mgExportTo').max = iso(today);
+        const from = new Date(today); from.setDate(from.getDate() - 29); $('mgExportFrom').value = iso(from);
+        $('mgExportForm').range.value = 'all';
+        $('mgExportBeats').checked = false;
+        $('mgExportError').hidden = true;
+        $('mgExportDialog').showModal();
+    };
+    $('mgExportCancel').onclick = () => $('mgExportDialog').close();
+    $('mgExportForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const q = new URLSearchParams({ tz }), r = $('mgExportForm').range.value;
+        if (r === 'page') { q.set('from', ex.pageRange.from); q.set('to', ex.pageRange.to); }
+        if (r === 'custom') {
+            const f = $('mgExportFrom').value, t = $('mgExportTo').value;
+            if (!f || !t || t < f) { $('mgExportError').textContent = 'Choose a start day on or before the end day.'; $('mgExportError').hidden = false; return; }
+            q.set('from', f); q.set('to', t);
+        }
+        if ($('mgExportBeats').checked) q.set('beats', '1');
+        location.href = '/internal_web/participants/' + encodeURIComponent(ex.uid) + '/export?' + q.toString();   // downloads; the page stays
+        $('mgExportDialog').close();
+    });
+
+    window.mgImport = function (opts) {
+        im = opts;
+        $('mgImportWho').textContent = 'Into ' + (opts.name ? opts.name + ' · ' : '') + 'participant ' + opts.uid;
+        $('mgImportForm').reset();
+        $('mgImportPlan').hidden = true; $('mgImportError').hidden = true; $('mgImportGo').disabled = true; $('mgImportGo').hidden = false;
+        $('mgImportCheck').hidden = false; $('mgImportCancel').textContent = 'Cancel';
+        $('mgImportDialog').showModal();
+    };
+    $('mgImportCancel').onclick = () => $('mgImportDialog').close();
+    ['mgImportFile', 'mgImportOverwrite'].forEach((id) => $(id).addEventListener('change', () => { $('mgImportGo').disabled = true; $('mgImportPlan').hidden = true; }));
+    async function send(apply) {
+        const f = $('mgImportFile').files[0];
+        if (!f) throw new Error('Choose a file first.');
+        const body = new FormData();
+        body.append('file', f); body.append('overwrite', $('mgImportOverwrite').checked ? '1' : '0'); body.append('apply', apply ? '1' : '0');
+        const r = await fetch('/internal_web/participants/' + encodeURIComponent(im.uid) + '/import', { method: 'POST', body });
+        const d = await r.json();
+        if (!d.success) throw new Error(d.error || 'Could not read the file');
+        return d.plan;
+    }
+    function showPlan(p, applied) {
+        const c = p.checkins, q = p.questionnaires;
+        const prof = p.profile.length ? '<ul>' + p.profile.map((x) => '<li>' + esc(x.field) + ': ' + (x.action === 'add' ? 'add “' + esc(x.to) + '”'
+            : x.action === 'replace' ? '“' + esc(x.from) + '” → “' + esc(x.to) + '”' : 'keep “' + esc(x.from) + '” (file has “' + esc(x.to) + '”)') + '</li>').join('') + '</ul>' : ' nothing to change';
+        $('mgImportPlan').innerHTML = (applied ? '<strong style="color:var(--mg-ok)"><i class="fas fa-check"></i> Imported.</strong>' : '<strong>This file would:</strong>') +
+            (p.file_uid && p.file_uid !== p.target_uid ? '<div class="mg-io__warn"><i class="fas fa-triangle-exclamation"></i> The file is from participant ' + esc(p.file_uid) +
+                '; it would go into ' + esc(p.target_uid) + '.</div>' : '') +
+            '<span class="mg-label">Profile</span>' + prof +
+            '<span class="mg-label">Check-ins</span> ' + c.new + ' new, ' + c.newer + ' newer copies, ' + c.unchanged + ' already here' + (c.older ? ', ' + c.older + ' older copies skipped' : '') + (c.other_participant ? ', ' + c.other_participant + ' belong to another participant' : '') + (c.invalid ? ', <span class="mg-io__warn">' + c.invalid + ' not valid</span>' : '') +
+            '<span class="mg-label">Questionnaires</span> ' + q.new + ' new, ' + q.unchanged + ' already here' + (q.invalid ? ', <span class="mg-io__warn">' + q.invalid + ' not valid</span>' : '') +
+            (p.errors.length ? '<span class="mg-label">Problems</span><ul class="mg-error">' + p.errors.map((e) => '<li>' + esc(e) + '</li>').join('') + '</ul>' : '') +
+            '<span class="mg-label">Not imported</span><ul>' + p.not_imported.map((e) => '<li>' + esc(e) + '</li>').join('') + '</ul>' +
+            (p.exported_at ? '<div class="mg-meta">Exported ' + esc(new Date(p.exported_at).toLocaleString()) + '</div>' : '');
+        $('mgImportPlan').hidden = false;
+    }
+    $('mgImportCheck').onclick = async () => {
+        $('mgImportError').hidden = true;
+        try {
+            const p = await send(false);
+            showPlan(p, false);
+            const nothing = !p.profile.some((x) => x.action !== 'keep') && !p.checkins.new && !p.checkins.newer && !p.questionnaires.new;
+            $('mgImportGo').disabled = !!p.errors.length || nothing;
+            if (nothing && !p.errors.length) $('mgImportPlan').insertAdjacentHTML('beforeend', '<div class="mg-meta">Everything in this file is already here.</div>');
+        } catch (e) { $('mgImportError').textContent = e.message; $('mgImportError').hidden = false; }
+    };
+    $('mgImportForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        $('mgImportGo').disabled = true;
+        try {
+            const p = await send(true);
+            showPlan(p, true);
+            $('mgImportGo').hidden = true; $('mgImportCheck').hidden = true; $('mgImportCancel').textContent = 'Close';
+            if (im.onDone) im.onDone(p);
+        } catch (ex2) { $('mgImportError').textContent = ex2.message; $('mgImportError').hidden = false; $('mgImportGo').disabled = false; }
+    });
+})();
+</script>

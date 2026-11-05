@@ -18,6 +18,11 @@ from datetime import datetime, timezone
 from study_framework_core.core.config import get_config
 
 COLLECTION = 'signup_requests'
+# Participants' own web login (seeing only their data). Off during the study: the study team works on the
+# site with admin accounts, so participants sign up without a password and never sign in. Turning it on
+# brings back the password on the sign-up form, sign-in with email, and the request for a login to an
+# account the study team created.
+PARTICIPANT_WEB_LOGIN = False
 LOGINS = 'participant_logins'       # participants' web logins: {email, password_hash, uid}
 KINDS = ('participant', 'staff')
 GENDERS = ('female', 'male', 'nonbinary', 'other', 'prefer_not_to_say')
@@ -82,7 +87,7 @@ def clean_request(data):
         raise SignupError('Enter a valid email address.')
     doc = {'kind': kind, 'name': name, 'email': email, 'status': 'pending', 'created_at': _now()}
     password = str(data.get('password') or '')
-    if len(password) < 8 or len(password) > 128:
+    if (kind == 'staff' or PARTICIPANT_WEB_LOGIN) and not 8 <= len(password) <= 128:
         raise SignupError('Password: at least 8 characters.')
 
     if kind == 'participant':
@@ -95,7 +100,9 @@ def clean_request(data):
         gender = data.get('gender')
         if gender not in GENDERS:
             raise SignupError('Choose a gender option.')
-        doc.update(age=age, gender=gender, password_hash=salted_hash(password))
+        doc.update(age=age, gender=gender)
+        if PARTICIPANT_WEB_LOGIN:
+            doc['password_hash'] = salted_hash(password)
     else:
         username = str(data.get('username') or '').strip()
         if not USERNAME_RX.match(username):
@@ -112,9 +119,11 @@ def submit(db, data):
     if db[COLLECTION].find_one({'kind': doc['kind'], 'email': _email_rx(doc['email']), 'status': 'pending'}):
         raise SignupError('A request with this email is already waiting for review.')
     if doc['kind'] == 'participant':
+        existing = db[cols.USERS].find_one({'email': _email_rx(doc['email'])}, {'uid': 1})
+        if existing and not PARTICIPANT_WEB_LOGIN:
+            raise SignupError('This email is already registered with the study. Contact the study team if you need help.')
         if db[LOGINS].find_one({'email': doc['email']}):
             raise SignupError('This email already has an account. Sign in instead.')
-        existing = db[cols.USERS].find_one({'email': _email_rx(doc['email'])}, {'uid': 1})
         if existing:
             doc['claim_uid'] = existing['uid']      # the study team created them already: this asks only for a login
     else:

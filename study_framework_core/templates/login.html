@@ -133,7 +133,7 @@
                     </span>
                     <div class="form-floating flex-grow-1">
                         <input type="text" class="form-control" id="username" placeholder="Username or email" autocomplete="username" required>
-                        <label for="username">Username, or email for participants</label>
+                        <label for="username">{{ 'Username, or email for participants' if participant_login else 'Username' }}</label>
                     </div>
                 </div>
                 

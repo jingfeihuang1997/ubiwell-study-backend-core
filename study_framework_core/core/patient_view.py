@@ -425,8 +425,8 @@ SYMPTOM_NODES = ('sx_main', 'sx_which', 'sx_h', 'sx_d', 'sx_n', 'sx_v', 'sx_l')
 PLAN_NODES = ('p_ask', 'p_confirm', 'p_free', 'p_main', 'p_barrier', 'p_stopwhy')
 EXERTION_NODES = ('p_sym', 'p_before', 'p_after', 'p_settle', 'p_stopped')
 MOOD_NODES = ('m_gate', 'm_why', 'm_hopeless')
-# Categories the clinicians asked for that Mind Guard does not ask yet; these node ids are what the
-# skill will use when it does (anxiety and fatigue with a 0 to 10 rating, appetite as a choice).
+# Categories the clinicians asked for, asked by Mind Guard since Nov 2026: fatigue and anxiety every day
+# (with a 0 to 10 rating), irritability and appetite every 2nd day and on mixed or low mood days.
 ANXIETY_NODES = ('an_main', 'an_level')
 IRRITABILITY_NODES = ('ir_main',)
 FATIGUE_NODES = ('fa_main', 'fa_level')
@@ -445,7 +445,7 @@ MEASURES = [
     ('mood', 'Depression / low mood', 'How has your mood been overall: mostly good, mixed, or mostly low? (then: have you felt hopeless?)',
      'The choice picked; severe when they also said they felt hopeless.', True),
     ('anxiety', 'Anxiety', 'In the past day, have you felt nervous, worried, or on edge? How strong, from 0 to 10?',
-     'The rating, or reported / none.', False),
+     'The rating, or reported / none.', True),
     ('headache', 'Headache (worst)', 'For the headache: at its worst, how strong was it, from 0 to 10?',
      'The number given. Asked only when a headache was named.', True),
     ('symptoms', 'Symptoms', 'Have you had any headaches, dizziness, nausea, trouble seeing, or problems with light or noise?',
@@ -453,10 +453,10 @@ MEASURES = [
     ('symptom_trend', 'Symptom trend', 'Compared with last time, are your symptoms better, about the same, or worse?',
      'The choice picked.', True),
     ('fatigue', 'Fatigue', 'Have you felt more tired or low on energy than usual? How strong, from 0 to 10?',
-     'The rating, or reported / none.', False),
-    ('irritability', 'Irritability', 'Have you felt more irritable or easily annoyed than usual?', 'Reported or none.', False),
+     'The rating, or reported / none.', True),
+    ('irritability', 'Irritability', 'Have you felt more irritable or easily annoyed than usual?', 'Reported or none.', True),
     ('appetite', 'Appetite / nutrition', 'How has your appetite been: about normal, less than usual, or more than usual?',
-     'The choice picked; less than usual is flagged.', False),
+     'The choice picked; less than usual is flagged.', True),
     ('plan', 'Recovery plan', 'How much of your plan have you been able to do: all of it, some of it, or not really?',
      'The choice picked.', True),
     ('exertion', 'Symptoms with activity', 'Before you started, how bad were your symptoms, from 0 to 10? And at the worst point?',
