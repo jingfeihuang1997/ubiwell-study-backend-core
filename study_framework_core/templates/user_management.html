@@ -67,16 +67,57 @@
 <body>
     {% include 'navigation.html' %}
     <div class="container main-container">
-        <div class="row">
-            <div class="col-12">
-                <h1 class="text-center mb-4">
-                    <i class="fas fa-users"></i> Participant Management Dashboard
-                </h1>
+        <div class="mg-page-head">
+            <div>
+                <h1 class="mg-h1">User Management</h1>
+                <p class="mg-subtitle">Participants, their Alexa and watch setup, and sign-up requests waiting for review.</p>
             </div>
         </div>
 
         <!-- Alert Messages -->
         <div id="alertContainer"></div>
+
+        <!-- Sign-up requests from the login page -->
+        <div class="mg-banner" id="signupBanner" hidden style="margin-bottom:1rem">
+            <i class="fas fa-user-clock"></i><span id="signupBannerText"></span>
+            <a class="mg-btn mg-btn--sm" href="#signupRequests">Review</a>
+        </div>
+        <section class="mg-card" id="signupRequests" hidden style="margin-bottom:1.5rem">
+            <div class="mg-card__head">
+                <h2 class="mg-title"><i class="fas fa-user-clock mg-card__icon"></i>Sign-up requests</h2>
+                <span class="mg-card__tools mg-meta">Profiles waiting for review. Nothing is set up until you approve.</span>
+            </div>
+            <div class="mg-card__body mg-card__body--flush" style="overflow-x:auto">
+                <table class="mg-table">
+                    <thead><tr><th>Submitted</th><th>Type</th><th>Name</th><th>Email</th><th>Profile</th><th>Mind Guard</th><th>Watch</th><th></th></tr></thead>
+                    <tbody id="signupRows"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <dialog class="mg-dialog" id="approveDialog" aria-labelledby="approveTitle">
+            <form method="dialog" id="approveForm">
+                <div class="mg-dialog__body">
+                    <h2 class="mg-title" id="approveTitle" style="font-size:1.05rem;margin-bottom:.25rem">Approve</h2>
+                    <p class="mg-subtitle" id="approveWho" style="margin-bottom:1rem"></p>
+                    <div id="approveParticipant">
+                        <div class="mg-field"><label for="approveUid">Participant ID</label>
+                            <input class="mg-input" id="approveUid" maxlength="40" required>
+                            <span class="mg-hint">The UbiWell user ID; the watch data and the patient page use it.</span></div>
+                        <div class="mg-field"><label for="approveStudy">Study ID</label>
+                            <input class="mg-input" id="approveStudy" maxlength="4" required>
+                            <span class="mg-hint">Starts the watch login code. Filled in from the newest participant's code.</span></div>
+                    </div>
+                    <p class="mg-body" id="approveStaff" hidden>This creates a sign-in for the internal web with the username and password they chose. Approved staff can see every participant.</p>
+                    <div class="mg-error" id="approveError" hidden></div>
+                    <div id="approveDone" hidden></div>
+                </div>
+                <div class="mg-dialog__foot">
+                    <button class="mg-btn" value="cancel" id="approveCancel" formnovalidate>Cancel</button>
+                    <button class="mg-btn mg-btn--primary" id="approveSubmit" value="default">Approve</button>
+                </div>
+            </form>
+        </dialog>
 
         <div class="row">
             <!-- Single User Creation -->
@@ -206,6 +247,8 @@
                                     <tr>
                                         <th>Participant ID</th>
                                         <th>Email</th>
+                                        <th>Mind Guard</th>
+                                        <th>Watch</th>
                                         <th>Created</th>
                                         <th>Actions</th>
                                     </tr>
@@ -251,7 +294,102 @@
         document.addEventListener('DOMContentLoaded', function() {
             resultsModal = new bootstrap.Modal(document.getElementById('resultsModal'));
             loadUsers();
+            loadSignups();
         });
+
+        // ---- Setup status shown for participants and for sign-up requests
+        const ALEXA = { connected: ['ok', 'Connected'], waiting: ['warn', 'No check-in yet'], no_email: ['danger', 'No email'] };
+        const WATCH = { receiving: ['ok', 'Receiving'], stale: ['warn', 'Nothing in 3 days'], app_only: ['warn', 'App signed in'], not_set_up: ['danger', 'Not set up'] };
+        const chip = (map, k) => { const [tone, text] = map[k] || ['', 'Unknown']; return `<span class="mg-chip${tone ? ' mg-chip--' + tone : ''}">${text}</span>`; };
+        let participantStatus = {};
+
+        // ---- Sign-up requests
+        let signupList = [], suggestedStudy = 'A1', approving = null;
+        async function loadSignups() {
+            try {
+                const r = await fetch('/internal_web/user-management/requests', { cache: 'no-store' });
+                const res = await r.json();
+                if (!res.success) throw new Error(res.error);
+                signupList = res.requests; suggestedStudy = res.suggested_study_id || 'A1';
+                renderSignups();
+            } catch (e) { showAlert(`Could not load sign-up requests: ${e.message}`, 'danger'); }
+        }
+        function renderSignups() {
+            const n = signupList.length;
+            document.getElementById('signupBanner').hidden = !n;
+            document.getElementById('signupRequests').hidden = !n;
+            document.getElementById('signupBannerText').textContent = n === 1 ? '1 sign-up request is waiting for review.' : `${n} sign-up requests are waiting for review.`;
+            const badge = document.querySelector('nav.mg-nav .mg-badge-count');   // the nav count was drawn when the page loaded
+            if (badge) { badge.textContent = n; badge.hidden = !n; }
+            document.getElementById('signupRows').innerHTML = signupList.map((r, i) => `
+                <tr>
+                    <td class="mg-num">${r.created_at ? new Date(r.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</td>
+                    <td><span class="mg-chip ${r.kind === 'participant' ? 'mg-chip--info' : ''}">${r.kind === 'participant' ? 'Participant' : 'Staff'}</span></td>
+                    <td><strong>${escapeHtml(r.name)}</strong></td>
+                    <td>${escapeHtml(r.email)}</td>
+                    <td>${r.kind === 'participant' ? `${escapeHtml(r.age)} y.o. ${escapeHtml(String(r.gender || '').replace(/_/g, ' '))}` : `${escapeHtml(r.username)}${r.role ? ' · ' + escapeHtml(r.role) : ''}`}</td>
+                    <td>${r.kind === 'participant' ? chip(ALEXA, 'waiting') : '<span class="mg-meta">–</span>'}</td>
+                    <td>${r.kind === 'participant' ? chip(WATCH, 'not_set_up') : '<span class="mg-meta">–</span>'}</td>
+                    <td style="white-space:nowrap;text-align:right">
+                        <button class="mg-btn mg-btn--sm mg-btn--primary" onclick="openApprove(${i})">Approve</button>
+                        <button class="mg-btn mg-btn--sm" onclick="rejectSignup(${i})">Reject</button>
+                    </td>
+                </tr>`).join('');
+        }
+        function suggestUid(r) {
+            const base = String(r.name || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
+            return base || 'participant';
+        }
+        window.openApprove = (i) => {
+            approving = signupList[i];
+            const isP = approving.kind === 'participant';
+            document.getElementById('approveTitle').textContent = isP ? 'Approve participant' : 'Approve study staff';
+            document.getElementById('approveWho').textContent = `${approving.name} · ${approving.email}`;
+            document.getElementById('approveParticipant').hidden = !isP;
+            document.getElementById('approveStaff').hidden = isP;
+            document.getElementById('approveUid').required = isP;
+            document.getElementById('approveStudy').required = isP;
+            document.getElementById('approveUid').value = isP ? suggestUid(approving) : '';
+            document.getElementById('approveStudy').value = suggestedStudy;
+            document.getElementById('approveError').hidden = true;
+            document.getElementById('approveDone').hidden = true;
+            document.getElementById('approveSubmit').hidden = false;
+            document.getElementById('approveCancel').textContent = 'Cancel';
+            document.getElementById('approveDialog').showModal();
+        };
+        document.getElementById('approveForm').addEventListener('submit', async (e) => {
+            if (e.submitter && e.submitter.value === 'cancel') return;
+            e.preventDefault();
+            const err = document.getElementById('approveError');
+            const btn = document.getElementById('approveSubmit'); btn.disabled = true;
+            try {
+                const r = await fetch(`/internal_web/user-management/requests/${encodeURIComponent(approving.id)}/approve`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uid: document.getElementById('approveUid').value.trim(), study_id: document.getElementById('approveStudy').value.trim() }) });
+                const res = await r.json();
+                if (!res.success) throw new Error(res.error);
+                const done = document.getElementById('approveDone');
+                done.innerHTML = res.result.uid
+                    ? `<p class="mg-body" style="margin-bottom:.5rem"><i class="fas fa-circle-check" style="color:var(--mg-ok)"></i> <strong>${escapeHtml(res.result.uid)}</strong> was created.</p>
+                       <p class="mg-body">Give the participant this watch login code: <code style="font-size:1.1rem">${escapeHtml(res.result.uid_code)}</code></p>
+                       <p class="mg-subtitle" style="margin-top:.5rem">Mind Guard will match their Alexa check-ins by ${escapeHtml(res.result.email)}.</p>`
+                    : `<p class="mg-body"><i class="fas fa-circle-check" style="color:var(--mg-ok)"></i> <strong>${escapeHtml(res.result.username)}</strong> can sign in now.</p>`;
+                done.hidden = false; err.hidden = true;
+                document.getElementById('approveParticipant').hidden = true; document.getElementById('approveStaff').hidden = true;
+                btn.hidden = true; document.getElementById('approveCancel').textContent = 'Close';
+                loadSignups(); loadUsers();
+            } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+            finally { btn.disabled = false; }
+        });
+        window.rejectSignup = async (i) => {
+            const r = signupList[i];
+            if (!confirm(`Reject the sign-up request from ${r.name} (${r.email})? Their profile is not created.`)) return;
+            try {
+                const res = await (await fetch(`/internal_web/user-management/requests/${encodeURIComponent(r.id)}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+                if (!res.success) throw new Error(res.error);
+                showAlert(`Request from ${r.name} rejected.`, 'info'); loadSignups();
+            } catch (e) { showAlert(`Could not reject: ${e.message}`, 'danger'); }
+        };
 
         // Show alert
         function showAlert(message, type = 'info') {
@@ -370,8 +508,9 @@
         // Load users
         async function loadUsers() {
             try {
-                const response = await fetch('/internal_web/user-management/users');
+                const [response, status] = await Promise.all([fetch('/internal_web/user-management/users'), fetch('/internal_web/user-management/status', { cache: 'no-store' })]);
                 const result = await response.json();
+                try { const st = await status.json(); participantStatus = st.success ? st.participants : {}; } catch (e) { participantStatus = {}; }
 
                 if (result.success) {
                     displayUsers(result.users);
@@ -398,10 +537,12 @@
                 return;
             }
 
-            tbody.innerHTML = users.map(user => `
+            tbody.innerHTML = users.map(user => { const st = participantStatus[user.uid] || {}; const pr = st.profile || {}; return `
                 <tr>
                     <td><strong>${user.uid}</strong></td>
                     <td>${user.email ? escapeHtml(user.email) : '<span class="text-muted">-</span>'}</td>
+                    <td>${chip(ALEXA, st.alexa)}</td>
+                    <td>${chip(WATCH, st.watch)}</td>
                     <td>${user.created_at ? new Date(user.created_at * 1000).toLocaleDateString() : '-'}</td>
                     <td>
                         <button class="btn btn-sm btn-outline-info" title="Open patient page" onclick="viewUserDetails('${user.uid}')">
@@ -412,7 +553,7 @@
                         </button>
                     </td>
                 </tr>
-            `).join('');
+            `; }).join('');
         }
 
         // Export users

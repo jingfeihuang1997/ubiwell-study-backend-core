@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mind Guard - Create an account</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    {% include '_theme.html' %}
+    <style>
+        body { display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; }
+        .su { width: 100%; max-width: 520px; }
+        .su-brand { display: flex; align-items: center; gap: .6rem; justify-content: center; margin-bottom: 1.25rem; }
+        .su-brand i { color: var(--mg-accent); font-size: 1.5rem; }
+        .su-brand span { font-size: 1.35rem; font-weight: 700; color: var(--mg-ink); }
+        .su .mg-card__body { padding: 1.25rem; }
+        .su-steps { display: flex; gap: .5rem; margin-bottom: 1rem; }
+        .su-steps span { flex: 1; height: 4px; border-radius: 2px; background: var(--mg-line); }
+        .su-steps span.on { background: var(--mg-accent); }
+        .su-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .75rem; }
+        @media (max-width: 480px) { .su-row { grid-template-columns: 1fr; } }
+        .su-review dt { font-size: .72rem; font-weight: 600; color: var(--mg-muted); text-transform: uppercase; letter-spacing: .04em; }
+        .su-review dd { margin: 0 0 .65rem; color: var(--mg-ink); font-weight: 600; word-break: break-word; }
+        .su-foot { text-align: center; margin-top: 1rem; font-size: .875rem; color: var(--mg-muted); }
+    </style>
+</head>
+<body>
+    <main class="su">
+        <div class="su-brand"><i class="fas fa-shield-alt"></i><span>Mind Guard</span></div>
+        <section class="mg-card">
+            <div class="mg-card__body">
+                <h1 class="mg-h1" style="margin-bottom:.25rem">Create an account</h1>
+                <p class="mg-subtitle" style="margin-bottom:1rem">An admin on the study team reviews every request before the account works.</p>
+                <div class="su-steps" aria-hidden="true"><span class="on" id="st1"></span><span id="st2"></span></div>
+
+                <form id="su-form" novalidate>
+                    <div class="mg-field">
+                        <label>I am</label>
+                        <div class="mg-radio-row">
+                            <label class="mg-radio-card"><input type="radio" name="kind" value="participant" checked><strong>A study participant</strong>
+                                <div class="mg-hint">Use Mind Guard on Alexa and wear the study watch.</div></label>
+                            <label class="mg-radio-card"><input type="radio" name="kind" value="staff"><strong>Study staff</strong>
+                                <div class="mg-hint">Review participants' data on this site.</div></label>
+                        </div>
+                    </div>
+
+                    <div class="mg-field"><label for="f-name">Full name</label><input class="mg-input" id="f-name" name="name" autocomplete="name" maxlength="80" required></div>
+
+                    <div data-for="participant">
+                        <div class="su-row">
+                            <div class="mg-field"><label for="f-age">Age</label><input class="mg-input" id="f-age" name="age" type="number" min="5" max="120" inputmode="numeric"></div>
+                            <div class="mg-field"><label for="f-gender">Gender</label>
+                                <select class="mg-select" id="f-gender" name="gender">
+                                    <option value="">Choose…</option>
+                                    {% for g in genders %}<option value="{{ g }}">{{ g | replace('_', ' ') | capitalize }}</option>{% endfor %}
+                                </select></div>
+                        </div>
+                    </div>
+
+                    <div class="mg-field"><label for="f-email" id="f-email-label">Email</label>
+                        <input class="mg-input" id="f-email" name="email" type="email" autocomplete="email" required>
+                        <span class="mg-hint" id="f-email-hint"></span></div>
+                    <div class="mg-field"><label for="f-email2">Confirm email</label><input class="mg-input" id="f-email2" type="email" autocomplete="off" required></div>
+
+                    <div data-for="staff" hidden>
+                        <div class="mg-field"><label for="f-role">Role or affiliation <span class="mg-meta">(optional)</span></label><input class="mg-input" id="f-role" name="role" maxlength="80"></div>
+                        <div class="mg-field"><label for="f-user">Username</label><input class="mg-input" id="f-user" name="username" autocomplete="username" maxlength="40">
+                            <span class="mg-hint">3 to 40 letters, digits, dots, dashes or underscores. You sign in with it.</span></div>
+                    </div>
+                    <div class="su-row">
+                        <div class="mg-field"><label for="f-pass">Password</label><input class="mg-input" id="f-pass" name="password" type="password" autocomplete="new-password" minlength="8"></div>
+                        <div class="mg-field"><label for="f-pass2">Confirm password</label><input class="mg-input" id="f-pass2" type="password" autocomplete="new-password"></div>
+                    </div>
+                    <p class="mg-hint" id="f-pass-hint" style="margin:-.4rem 0 .75rem"></p>
+
+                    <div class="mg-error" id="su-error" role="alert" hidden></div>
+                    <button class="mg-btn mg-btn--primary" type="submit" style="width:100%;margin-top:.5rem">Review my information</button>
+                </form>
+
+                <div id="su-review" hidden>
+                    <p class="mg-body" style="margin-bottom:.75rem">Please check that everything is right before you send it.</p>
+                    <dl class="su-review" id="su-review-list"></dl>
+                    <div class="mg-error" id="su-error2" role="alert" hidden></div>
+                    <div style="display:flex;gap:.5rem;margin-top:.5rem">
+                        <button class="mg-btn" id="su-edit" type="button" style="flex:1">Edit</button>
+                        <button class="mg-btn mg-btn--primary" id="su-send" type="button" style="flex:2">Confirm and send</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <p class="su-foot">Already have an account? <a href="/internal_web/login">Sign in</a></p>
+    </main>
+
+    <dialog class="mg-dialog" id="su-done" aria-labelledby="su-done-title">
+        <div class="mg-dialog__body">
+            <h2 class="mg-title" id="su-done-title" style="font-size:1.1rem;margin-bottom:.5rem"><i class="fas fa-circle-check" style="color:var(--mg-ok);margin-right:.4rem"></i>Request sent for review</h2>
+            <p class="mg-body" id="su-done-text"></p>
+        </div>
+        <div class="mg-dialog__foot"><a class="mg-btn mg-btn--primary" href="/internal_web/login">Back to sign in</a></div>
+    </dialog>
+
+    <script>
+    (function () {
+        const $ = (id) => document.getElementById(id);
+        const form = $('su-form');
+        const kind = () => form.querySelector('input[name="kind"]:checked').value;
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        function paintKind() {
+            const k = kind();
+            form.querySelectorAll('[data-for]').forEach((el) => (el.hidden = el.dataset.for !== k));
+            $('f-email-label').textContent = k === 'participant' ? 'Amazon account email' : 'Work email';
+            $('f-email-hint').textContent = k === 'participant'
+                ? 'The email of the Amazon account your Echo is signed in to. Mind Guard on Alexa and the watch app both use it to know it is you.'
+                : 'Where the study team can reach you.';
+            $('f-pass-hint').textContent = k === 'participant'
+                ? 'At least 8 characters. Once approved, you sign in here with your email and this password to see your own data (only yours).'
+                : 'At least 8 characters.';
+        }
+        form.querySelectorAll('input[name="kind"]').forEach((r) => (r.onchange = paintKind));
+        paintKind();
+
+        function collect() {
+            const k = kind(), v = (id) => $(id).value.trim();
+            const data = { kind: k, name: v('f-name'), email: v('f-email'), password: $('f-pass').value };
+            if (k === 'participant') Object.assign(data, { age: v('f-age'), gender: $('f-gender').value });
+            else Object.assign(data, { username: v('f-user'), role: v('f-role') });
+            return data;
+        }
+        function problem(d) {
+            if (!d.name) return 'Enter your full name.';
+            if (d.kind === 'participant') {
+                const a = Number(d.age);
+                if (!Number.isInteger(a) || a < 5 || a > 120) return 'Enter an age between 5 and 120.';
+                if (!d.gender) return 'Choose a gender option.';
+            }
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(d.email)) return 'Enter a valid email address.';
+            if (d.email.toLowerCase() !== $('f-email2').value.trim().toLowerCase()) return 'The two emails do not match.';
+            if (d.kind === 'staff' && !/^[A-Za-z0-9._-]{3,40}$/.test(d.username)) return 'Username: 3 to 40 letters, digits, dots, dashes or underscores.';
+            if (d.password.length < 8) return 'Password: at least 8 characters.';
+            if (d.password !== $('f-pass2').value) return 'The two passwords do not match.';
+            return null;
+        }
+        function showError(id, msg) { $(id).textContent = msg || ''; $(id).hidden = !msg; }
+
+        let pending = null;
+        form.onsubmit = (e) => {
+            e.preventDefault();
+            const d = collect(), p = problem(d);
+            showError('su-error', p);
+            if (p) return;
+            pending = d;
+            const rows = [['Account', d.kind === 'participant' ? 'Study participant' : 'Study staff'], ['Name', d.name]];
+            if (d.kind === 'participant') rows.push(['Age', d.age], ['Gender', $('f-gender').selectedOptions[0].textContent], ['Amazon account email', d.email]);
+            else rows.push(['Work email', d.email], ['Role', d.role || '–'], ['Username', d.username]);
+            rows.push(['Password', '•'.repeat(Math.min(d.password.length, 12))]);
+            $('su-review-list').innerHTML = rows.map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>').join('');
+            form.hidden = true; $('su-review').hidden = false; $('st2').classList.add('on');
+            showError('su-error2', null);
+        };
+        $('su-edit').onclick = () => { form.hidden = false; $('su-review').hidden = true; $('st2').classList.remove('on'); };
+        $('su-send').onclick = async () => {
+            const btn = $('su-send'); btn.disabled = true; btn.textContent = 'Sending…';
+            try {
+                const r = await fetch('/internal_web/signup/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pending) });
+                const res = await r.json();
+                if (!res.success) throw new Error(res.error || 'Could not send the request.');
+                $('su-done-text').textContent = pending.kind === 'staff'
+                    ? 'Your information was sent to the study admin for review. You can sign in as ' + pending.username + ' once it is approved.'
+                    : res.request.existing
+                    ? 'The study team has already added you to the study. Your request for a login was sent to the study admin; once it is approved, sign in here with ' + pending.email + ' and your password to see your own data.'
+                    : 'Your information was sent to the study admin for review. Once it is approved, sign in here with ' + pending.email + ' and your password to see your own data, and the study team will give you a login code for the watch app. Mind Guard on Alexa will recognise you by this email.';
+                pending.password = '';
+                $('su-done').showModal();
+            } catch (err) {
+                showError('su-error2', err.message);
+            } finally { btn.disabled = false; btn.textContent = 'Confirm and send'; }
+        };
+    })();
+    </script>
+</body>
+</html>

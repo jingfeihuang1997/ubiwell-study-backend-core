@@ -6,222 +6,1132 @@
     <title>Mind Guard - {{ uid }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    {% include '_theme.html' %}
     <style>
-        :root {
-            --bg: #f3f4f6; --panel: #ffffff; --line: #e5e7eb; --muted: #6b7280; --ink: #111827;
-            --accent: #2563eb; --emerg-bg: #fee2e2; --emerg-ink: #991b1b; --same-bg: #fef3c7; --same-ink: #92400e;
-        }
+        /* The page fills the window under the nav bar and does not scroll itself; only lists inside panes do.
+           A (calendar, patients) runs the full height on the left; B, then C | D over E, on the right. */
+        html { overflow-y: hidden; }
         html, body { height: 100%; }
-        body { margin: 0; display: flex; flex-direction: column; }
-        body > nav.mg-nav.navbar { margin-bottom: 0 !important; }   /* the page fills the window under the bar */
+        body { display: flex; flex-direction: column; margin: 0; min-height: 0 !important; }
+        body > nav.mg-nav.navbar { margin-bottom: 0 !important; }
+        .pt-app {
+            flex: 1; min-height: 0; padding: 12px 16px 16px; display: grid; gap: 12px;
+            grid-template-columns: 264px minmax(0, 1.5fr) minmax(0, 1fr);
+            /* row 2 holds the conversation history (D), rows 3-4 the check-in results (E); C spans 2-3.
+               4:1 gives the conversation about twice the room for messages it had at 1:1. */
+            grid-template-rows: auto minmax(0, 4fr) minmax(0, 1fr) auto;
+            grid-template-areas: "a b b" "a c d" "a c e" "a q e";
+        }
+        .pt-a { grid-area: a; } .pt-b { grid-area: b; } .pt-c { grid-area: c; } .pt-d { grid-area: d; } .pt-e { grid-area: e; } .pt-q { grid-area: q; }
 
-        /* One window: header on top, two panes that scroll on their own below it */
-        .pt-app { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 16px; }
-        .pt-header { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
-                     display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
-        .pt-name { font-size: 1.15rem; font-weight: 700; margin: 0; }
-        .pt-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: .85rem; color: var(--muted); }
-        .pt-facts b { color: var(--ink); font-weight: 600; }
-        .pt-controls { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-        .pt-controls .form-select, .pt-controls .form-control { width: auto; font-size: .875rem; }
-        .pt-tz { font-size: .75rem; color: var(--muted); }
+        /* A: calendar card over the patient list */
+        .pt-a { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+        .pt-calcard { flex: none; padding: .75rem .75rem .625rem; }
+        .pt-calcard .mg-cal__day { min-height: 30px; }
+        .pt-calcard .mg-cal__head .mg-btn { margin-left: .25rem; }
+        .pt-calcard .mg-cal__head .mg-icon-btn { width: 28px; height: 28px; }
+        .pt-seg-when { font-weight: 500; opacity: .8; }
+        .mg-seg button { padding: .25rem .6rem; }
+        .pt-d .mg-card__head, .pt-c .mg-card__head { flex-wrap: nowrap; }
+        .pt-d .mg-card__head > .mg-title, .pt-c .mg-card__head > .mg-title { white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+        .pt-d .mg-card__tools, .pt-c .mg-card__tools { flex-wrap: nowrap; flex: none; }
+        .pt-iconsrc > button span { display: none; }
+        #cal-range[aria-pressed="true"] { background: var(--mg-c-results); border-color: var(--mg-c-results); color: #fff; }
+        .pt-rangebar { display: flex; align-items: center; gap: .4rem; margin-top: .4rem; padding: .35rem .5rem; border-radius: 8px; font-size: .75rem; font-weight: 600;
+            background: color-mix(in srgb, var(--mg-c-results) 12%, transparent); color: var(--mg-ink-2); }
+        .pt-rangebar[hidden] { display: none; }
+        .pt-rangebar i { color: var(--mg-c-results); }
+        .pt-rangebar .mg-error { font-weight: 600; font-size: .75rem; }
+        .pt-rangebar button { margin-left: auto; appearance: none; border: 0; background: none; color: var(--mg-muted); cursor: pointer; padding: 0 .2rem; font-size: .85rem; line-height: 1; }
+        .pt-rangebar button:hover { color: var(--mg-danger); }
+        .pt-calcard .mg-meta { margin-top: .375rem; }
+        .pt-plist { flex: 1; }
+        .pt-plist .mg-card__body { padding: 0; }
 
-        .pt-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; }
-        .pt-pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-height: 0;
-                   display: flex; flex-direction: column; }
-        .pt-pane-head { padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; display: flex;
-                        align-items: center; gap: 8px; }
-        .pt-pane-head .count { margin-left: auto; font-weight: 400; font-size: .8rem; color: var(--muted); }
-        .pt-pane-body { padding: 12px 14px; overflow-y: auto; min-height: 0; flex: 1; }
+        /* B: one compact band, the participant and the facts side by side */
+        .pt-b { flex-direction: row; align-items: center; gap: 1.5rem; padding: .75rem 1.125rem; flex-wrap: wrap; }
+        .pt-who { min-width: 220px; display: flex; flex-direction: column; gap: .375rem; }
+        .pt-name { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+        .pt-name .mg-h1 { font-size: 1.375rem !important; }
+        .pt-since { display: flex; gap: .375rem; flex-wrap: wrap; }
+        .pt-factsets { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .5rem; }
+        .pt-facts { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .375rem 1.25rem; }
+        .pt-facts--clinical { padding-top: .5rem; border-top: 1px dashed var(--mg-line); }
+        @media (max-width: 1499.98px) { .pt-facts { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+        .pt-missing { font-weight: 400 !important; color: var(--mg-muted) !important; font-size: .78rem !important; }
+        .pt-add { appearance: none; border: 0; background: none; padding: 0; margin-left: .3rem; color: var(--mg-accent); font: inherit; font-size: .75rem; font-weight: 600; cursor: pointer; }
+        .pt-add:hover { text-decoration: underline; }
+        .pt-fact .mg-label { display: block; margin-bottom: .1rem; }
+        .pt-fact b { font-weight: 600; color: var(--mg-ink); font-size: .875rem; word-break: break-word; }
+        .pt-fact .mg-chip { margin: 0 .25rem .2rem 0; }
 
-        .pt-chart { width: 100%; height: 190px; margin-bottom: 8px; }
-        .pt-empty { color: var(--muted); font-size: .9rem; padding: 6px 0; }
-        .pt-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
-        .pt-stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
-        .pt-stat .v { font-size: 1.1rem; font-weight: 700; }
-        .pt-stat .l { font-size: .75rem; color: var(--muted); }
+        /* C: numbers on top, trends below; fits the pane, no scrolling */
+        .pt-c .mg-card__body { display: flex; flex-direction: column; gap: .625rem; overflow: hidden; }
+        /* the metric row is one line; more cards than fit scroll sideways */
+        .pt-c .mg-metrics { display: flex; flex-wrap: nowrap; gap: .5rem; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px;
+            scrollbar-width: thin; scroll-snap-type: x proximity; }
+        .pt-c .mg-metric { padding: .55rem .7rem; flex: 1 0 152px; max-width: 230px; cursor: pointer; scroll-snap-align: start; position: relative; }
+        .pt-c .mg-metric:hover { border-color: var(--mod); }
+        .pt-c .mg-metric[aria-current="true"] { border-color: var(--mod); box-shadow: inset 0 0 0 1px var(--mod); }
+        .pt-more { appearance: none; border: 0; background: none; color: var(--mg-muted); margin-left: auto; padding: 0 .2rem; line-height: 1; cursor: pointer; border-radius: 6px; font-size: .9rem; }
+        .pt-more:hover { color: var(--mg-ink); background: var(--mg-panel-2); }
+        .pt-addcard { flex: 0 0 96px; appearance: none; font: inherit; font-size: .8125rem; font-weight: 600; color: var(--mg-muted); background: none;
+            border: 1px dashed var(--mg-line-strong); border-radius: var(--mg-radius-sm); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; cursor: pointer; }
+        .pt-addcard:hover { color: var(--mg-accent); border-color: var(--mg-accent); }
+        .pt-menu { position: fixed; z-index: 50; min-width: 200px; background: var(--mg-panel); border: 1px solid var(--mg-line); border-radius: 10px;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, .18); padding: .3rem; }
+        .pt-menu[hidden] { display: none; }
+        .pt-menu button { display: flex; width: 100%; align-items: center; gap: .5rem; appearance: none; border: 0; background: none; font: inherit; font-size: .8125rem;
+            color: var(--mg-ink-2); padding: .45rem .6rem; border-radius: 7px; cursor: pointer; text-align: left; }
+        .pt-menu button:hover:not(:disabled) { background: var(--mg-panel-2); color: var(--mg-ink); }
+        .pt-menu button:disabled { color: var(--mg-muted); cursor: default; }
+        .pt-menu .mg-label { display: block; padding: .35rem .6rem .15rem; }
+        .pt-menu small { color: var(--mg-muted); display: block; font-size: .7rem; }
 
-        .mg-checkin { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
-        .mg-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; font-size: .85rem; }
-        .mg-status { padding: 1px 8px; border-radius: 999px; background: #f3f4f6; color: #374151; font-size: .75rem; }
-        .mg-status-completed { background: #d1fae5; color: #065f46; }
-        .mg-status-in_progress { background: #dbeafe; color: #1e40af; }
-        .mg-status-ended_safety { background: var(--emerg-bg); color: var(--emerg-ink); }
-        .mg-flag { padding: 4px 8px; border-radius: 6px; margin-bottom: 4px; font-size: .85rem; }
-        .mg-flag-EMERG { background: var(--emerg-bg); color: var(--emerg-ink); }
-        .mg-flag-SAME-DAY { background: var(--same-bg); color: var(--same-ink); }
-        .mg-turn { display: grid; grid-template-columns: 52px 1fr; gap: 2px 8px; padding: 6px 0; border-top: 1px solid #f3f4f6; }
-        .mg-time { color: var(--muted); font-size: .75rem; padding-top: 2px; }
-        .mg-q { color: var(--muted); font-size: .82rem; }
-        .mg-a { font-size: .92rem; }
-        .mg-asq { font-size: .82rem; margin: 4px 0 6px; }
-        details.mg-summary { font-size: .82rem; margin-top: 6px; }
+        /* Q: questionnaires, under C */
+        .mg-metric--hrv { --mod: var(--mg-c-log); } .mg-metric--worn { --mod: var(--mg-c-info); } .mg-metric--phone { --mod: var(--mg-c-battery); }
+        .pt-q .mg-card__body { max-height: 210px; }
+        .pt-q .mg-table td:first-child { color: var(--mg-ink); font-weight: 600; }
 
-        /* Phones and narrow windows: stack the panes and let the page scroll as a whole */
-        @media (max-width: 900px) {
+        /* E footer: reach the family */
+        .pt-e .mg-card__foot { justify-content: flex-end; }
+        .pt-dotcell { width: 14px; padding-right: 0 !important; }
+        .pt-dotcell .mg-dot { margin-top: .3rem; }
+        .mg-dot--orange { background: var(--mg-warn); }
+        .pt-c .mg-metric .mg-value { font-size: 1.35rem; }
+        .pt-c .mg-metric .mg-subtitle { font-size: .72rem; line-height: 1.35; }
+        .pt-tabpanel { display: flex; flex-direction: column; gap: .5rem; flex: 1; min-height: 0; }
+        .pt-tabpanel__bar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; flex: none; }
+        .pt-tabpanel__bar .mg-nodata-key { margin-left: auto; }
+        .pt-chart { width: 100%; flex: 1; min-height: 160px; }
+        .pt-note { flex: none; }
+
+        /* D: the transcript; the check-in head sticks right under the tabs */
+        .pt-tabs-row { padding: 0 1rem; display: flex; align-items: flex-end; gap: .75rem; border-bottom: 1px solid var(--mg-line); flex: none; }
+        .pt-tabs-row .mg-tabs { border-bottom: 0; flex: none; }
+        .pt-tabs-row .mg-jump { margin-left: auto; padding-bottom: .4rem; min-width: 0; }
+        .pt-searchrow { display: flex; align-items: center; gap: .45rem; padding: .4rem 1rem; border-bottom: 1px solid var(--mg-line); flex: none; color: var(--mg-muted); font-size: .8rem; }
+        .pt-searchrow input { flex: 1; min-width: 80px; border: 0; background: none; color: var(--mg-ink); font: inherit; font-size: .8125rem; outline: none; }
+        .pt-searchrow input::placeholder { color: var(--mg-muted); }
+        .pt-dfilter button { appearance: none; border: 0; background: none; color: inherit; padding: 0 0 0 .2rem; cursor: pointer; }
+        .pt-bubble mark { background: color-mix(in srgb, var(--mg-warn) 35%, transparent); color: inherit; padding: 0 1px; border-radius: 3px; }
+        .pt-summary { font-size: .75rem; color: var(--mg-ink-2); background: color-mix(in srgb, var(--mg-c-log) 7%, transparent); border-radius: 8px; padding: .4rem .6rem; margin: .1rem 0 .4rem; }
+        .pt-summary .mg-label { margin-right: .35rem; }
+        .pt-ai { font-size: .75rem; color: var(--mg-muted); border: 1px dashed var(--mg-line-strong); border-radius: 8px; padding: .4rem .6rem; margin: .6rem 0 .2rem; display: flex; gap: .4rem; }
+        .pt-d.pt-expanded { position: fixed; inset: 16px; z-index: 70; box-shadow: 0 24px 60px rgba(0, 0, 0, .35); }
+        .pt-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 69; }
+        .pt-backdrop[hidden] { display: none; }
+        .pt-d.pt-expanded .pt-bubble { max-width: 70%; }
+        .pt-inconv { appearance: none; border: 0; background: none; color: var(--mg-muted); padding: 0 .2rem; cursor: pointer; }
+        .pt-inconv:hover { color: var(--mg-c-log); }
+        #d-log { padding-top: 0; position: relative; }
+        .pt-checkin { padding-bottom: .75rem; }
+        .pt-checkin__head { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; position: sticky; top: 0; z-index: 1;
+            background: var(--mg-panel); padding: .5rem 0; margin-bottom: .25rem; border-bottom: 1px solid var(--mg-line); }
+        .pt-bubble { max-width: 88%; padding: .45rem .7rem; border-radius: 12px; font-size: .8125rem; line-height: 1.4; margin: .25rem 0; }
+        .pt-bubble--bot { background: var(--mg-panel-2); color: var(--mg-ink-2); border-top-left-radius: 4px; }
+        .pt-bubble--me { margin-left: auto; width: fit-content; background: color-mix(in srgb, var(--mg-c-log) 14%, transparent); color: var(--mg-ink); border-top-right-radius: 4px; }
+        .pt-turn__time { font-size: .65rem; color: var(--mg-muted); text-align: right; margin-top: -.1rem; }
+
+        /* E */
+        .pt-e .mg-table td:first-child { color: var(--mg-ink); font-weight: 600; }
+        .pt-q { font-weight: 400; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .pt-detail td { background: var(--mg-panel-2); font-size: .75rem; }
+        .pt-qa-entry + .pt-qa-entry { margin-top: .625rem; padding-top: .625rem; border-top: 1px solid var(--mg-line); }
+        .pt-qa-when { font-weight: 600; color: var(--mg-ink); margin-bottom: .25rem; }
+        .pt-qa { display: grid; grid-template-columns: auto 1fr; gap: .1rem .5rem; margin: 0; }
+        .pt-qa dt { font-weight: 600; color: var(--mg-muted); }
+        .pt-qa dd { margin: 0; color: var(--mg-ink-2); }
+        .pt-qa dd.pt-qa__a { color: var(--mg-ink); }
+        .sev-high { color: var(--mg-danger); font-weight: 700; }
+        .sev-mid { color: var(--mg-warn); font-weight: 700; }
+        .pt-none { color: var(--mg-muted); font-weight: 400; }
+
+        /* Narrower windows: the page scrolls, the panes stack */
+        @media (max-width: 1279.98px) {
+            html { overflow-y: scroll; }
             html, body { height: auto; }
-            .pt-app { padding: 10px; }
-            .pt-body { grid-template-columns: 1fr; }
-            .pt-pane-body { overflow: visible; }
-            .pt-controls { margin-left: 0; width: 100%; }
+            .pt-app { grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: auto; grid-template-areas: "a b" "a c" "a q" "a d" "a e"; }
+            .pt-c { height: 680px; } .pt-d { height: 900px; } .pt-e { height: 520px; }
+            .pt-a { align-self: start; position: sticky; top: 12px; max-height: calc(100vh - 24px); }
+        }
+        @media (max-width: 899.98px) {
+            .pt-app { grid-template-columns: 1fr; grid-template-areas: "b" "a" "c" "q" "d" "e"; padding: 10px 16px; }
+            .pt-a { position: static; max-height: none; }
+            .pt-plist { max-height: 260px; }
         }
     </style>
-    {% include '_theme.html' %}
 </head>
 <body>
     {% include 'navigation.html' %}
 
     <main class="pt-app">
-        <section class="pt-header">
-            <div>
-                <h1 class="pt-name"><i class="fas fa-user me-2 text-secondary"></i><span id="pt-uid">{{ uid }}</span></h1>
-                <div class="pt-facts">
-                    <span>Email <b id="pt-email">–</b></span>
-                    <span>Login code <b id="pt-code">–</b></span>
-                    <span>Last phone contact <b id="pt-ping">–</b></span>
+        <!-- A: calendar, then the patient list -->
+        <div class="pt-a">
+            <section class="mg-card mg-card--info pt-calcard mg-cal" id="cal" aria-label="Calendar">
+                <div class="mg-cal__head">
+                    <h2 class="mg-title" id="cal-title">Calendar</h2>
+                    <button class="mg-icon-btn" id="cal-prev" title="Previous month"><i class="fas fa-chevron-left"></i></button>
+                    <button class="mg-icon-btn" id="cal-next" title="Next month"><i class="fas fa-chevron-right"></i></button>
+                    <button class="mg-btn mg-btn--sm" id="cal-today" title="This week">Today</button>
+                    <button class="mg-icon-btn" id="cal-range" title="Pick a custom range of days" aria-pressed="false"><i class="fas fa-arrows-left-right"></i></button>
                 </div>
+                <div class="mg-cal__grid" id="cal-grid"></div>
+                <div class="pt-rangebar" id="cal-rangebar" hidden></div>
+                <div class="mg-legend">
+                    <span><i style="background: var(--mg-c-log)"></i>Mind Guard check-in</span>
+                    <span><i style="background: var(--mg-c-heart)"></i>Watch data</span>
+                </div>
+                <div class="mg-meta" id="pt-tz"></div>
+            </section>
+
+            <section class="mg-card pt-plist" aria-label="Patients">
+                <div class="mg-card__head"><h2 class="mg-title"><i class="fas fa-users mg-card__icon"></i>Patients</h2><span class="mg-card__tools mg-meta">{{ participants|length }}</span></div>
+                <div class="mg-card__body">
+                    <ul class="mg-plist" id="plist">
+                        {% for p in participants %}
+                        <li><a href="/internal_web/patient/{{ p.uid | urlencode }}" data-uid="{{ p.uid }}" {% if p.uid == uid %}aria-current="page"{% endif %}>
+                            <span class="mg-dot mg-dot--{{ p.dot }}" title="{{ {'red': 'Safety flag in the last 7 days', 'green': 'Data in the last 3 days', 'grey': 'No data in the last 3 days'}[p.dot] }}"></span>
+                            <span style="min-width:0">
+                                <span class="mg-title d-block text-truncate">{{ p.name or p.uid }}</span>
+                                <span class="mg-subtitle d-block text-truncate">{% if p.age %}{{ p.age }} y.o.{% endif %}{% if p.gender %} {{ p.gender | replace('_', ' ') }}{% endif %}{% if not p.age and not p.gender %}{{ p.uid if p.name else 'No profile yet' }}{% endif %}</span>
+                            </span>
+                        </a></li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </section>
+        </div>
+
+        <!-- B: the participant -->
+        <section class="mg-card mg-card--info pt-b" aria-label="Participant">
+            <div class="pt-who">
+                <div class="pt-name"><h1 class="mg-h1" id="pt-name">{{ uid }}</h1><span class="mg-subtitle" id="pt-demo"></span></div>
+                <div class="pt-since" id="pt-since"></div>
+                {% if admin %}<div><button type="button" class="mg-btn mg-btn--sm" id="pt-edit"><i class="fas fa-pen"></i>Edit profile and clinical info</button></div>{% endif %}
             </div>
-            <div class="pt-controls">
-                <select id="pt-patient" class="form-select form-select-sm" aria-label="Patient">
-                    {% for p in participants %}<option value="{{ p }}" {% if p == uid %}selected{% endif %}>{{ p }}</option>{% endfor %}
-                </select>
-                <button id="pt-prev" class="btn btn-sm btn-outline-secondary" title="Previous day"><i class="fas fa-chevron-left"></i></button>
-                <input id="pt-date" type="date" class="form-control form-control-sm" aria-label="Date">
-                <button id="pt-next" class="btn btn-sm btn-outline-secondary" title="Next day"><i class="fas fa-chevron-right"></i></button>
-                <button id="pt-today" class="btn btn-sm btn-outline-primary">Today</button>
-                <span class="pt-tz" id="pt-tz"></span>
+            <div class="pt-factsets">
+                <div class="pt-facts">
+                    <div class="pt-fact"><span class="mg-label">Participant ID</span><b id="pt-uid">{{ uid }}</b></div>
+                    <div class="pt-fact"><span class="mg-label">Email (Alexa and watch)</span><b id="pt-email">…</b></div>
+                    <div class="pt-fact"><span class="mg-label">Watch login code</span><b id="pt-code">…</b></div>
+                    <div class="pt-fact"><span class="mg-label">Last phone contact</span><b id="pt-ping">…</b></div>
+                    <div class="pt-fact"><span class="mg-label">Setup</span><span id="pt-link"></span></div>
+                </div>
+                <div class="pt-facts pt-facts--clinical">
+                    <div class="pt-fact"><span class="mg-label">Date of injury</span><b id="pt-injury">…</b></div>
+                    <div class="pt-fact"><span class="mg-label">Phase in concussion</span><b id="pt-phase">…</b></div>
+                    <div class="pt-fact"><span class="mg-label">Psychiatric history</span><b id="pt-psych">…</b></div>
+                    <div class="pt-fact"><span class="mg-label">Mental health prescriptions</span><b id="pt-mh">…</b></div>
+                    <div class="pt-fact"><span class="mg-label">Phone (patient / parent)</span><b id="pt-phone">…</b></div>
+                </div>
             </div>
         </section>
 
-        <section class="pt-body">
-            <div class="pt-pane">
-                <div class="pt-pane-head"><i class="fas fa-heart-pulse text-danger"></i>Wearable<span class="count" id="pt-wear-count"></span></div>
-                <div class="pt-pane-body" id="pt-wear"><div class="pt-empty">Loading…</div></div>
+        <!-- C: watch -->
+        <section class="mg-card mg-card--data pt-c" aria-label="Sleep and physical activity">
+            <div class="mg-card__head">
+                <h2 class="mg-title"><i class="fas fa-heart-pulse mg-card__icon"></i>Sleep &amp; physical activity</h2>
+                <div class="mg-card__tools">
+                    <div class="mg-seg" data-range="c"><button data-v="week"></button><button data-v="day"></button></div>
+                    <div class="mg-source"><button type="button"><i class="fas fa-circle-info"></i>Where does the data come from?</button>
+                        <div class="mg-source__panel" id="c-source"></div></div>
+                </div>
             </div>
-            <div class="pt-pane">
-                <div class="pt-pane-head"><i class="fas fa-comments text-primary"></i>Mind Guard conversation<span class="count" id="pt-log-count"></span></div>
-                <div class="pt-pane-body" id="pt-log"><div class="pt-empty">Loading…</div></div>
+            <div class="mg-card__body">
+                <div class="mg-metrics" id="c-metrics"></div>
+                <div class="mg-tabs" role="tablist" id="c-tabs">
+                    <button class="mg-tab" role="tab" data-tab="sleep" style="--mod: var(--mg-c-sleep)">Sleep (estimated)</button>
+                    <button class="mg-tab" role="tab" data-tab="heart" style="--mod: var(--mg-c-heart)">Heart rate &amp; stress</button>
+                    <button class="mg-tab" role="tab" data-tab="breath" style="--mod: var(--mg-c-breath)">Breathing</button>
+                    <button class="mg-tab" role="tab" data-tab="activity" style="--mod: var(--mg-c-steps)">Physical activity</button>
+                </div>
+                <div class="pt-tabpanel" id="c-panel"></div>
             </div>
         </section>
+
+        <!-- Q: questionnaires the patient fills in at home -->
+        <section class="mg-card mg-card--results pt-q" aria-label="Questionnaire results">
+            <div class="mg-card__head">
+                <h2 class="mg-title"><i class="fas fa-file-medical mg-card__icon"></i>Questionnaire results</h2>
+                <div class="mg-card__tools">
+                    <span class="mg-meta" id="q-range"></span>
+                    <div class="mg-source"><button type="button"><i class="fas fa-circle-info"></i>Where does the data come from?</button>
+                        <div class="mg-source__panel">Questionnaires the patient completes at home: <strong>GAD-7</strong> for anxiety, <strong>PHQ-9</strong> for
+                            depression and the <strong>PCSS</strong> for concussion symptoms. The score shows the previous and the latest result, with the
+                            band from the scale's published cut-offs (the PCSS has none). <strong>Nothing sends these questionnaires to the study server
+                            yet</strong>, so they show as not collected. Mind Guard is planned to ask the PHQ-9 and GAD-7 by voice next; results will show here.</div></div>
+                </div>
+            </div>
+            <div class="mg-card__body mg-card__body--flush" id="q-table"></div>
+        </section>
+
+        <!-- D: Mind Guard log -->
+        <section class="mg-card mg-card--log pt-d" aria-label="Conversation history">
+            <div class="mg-card__head">
+                <h2 class="mg-title"><i class="fas fa-comments mg-card__icon"></i>Conversation history</h2>
+                <div class="mg-card__tools">
+                    <div class="mg-seg" data-range="d"><button data-v="week"></button><button data-v="day"></button></div>
+                    <button type="button" class="mg-icon-btn" id="d-expand" title="Expand the conversation" aria-label="Expand the conversation" aria-pressed="false"><i class="fas fa-up-right-and-down-left-from-center"></i></button>
+                    <div class="mg-source pt-iconsrc"><button type="button" title="Where does the data come from?" aria-label="Where does the data come from?"><i class="fas fa-circle-info"></i><span>Source</span></button>
+                        <div class="mg-source__panel"><strong>Mind Guard (Alexa skill).</strong> Each question as Mind Guard asked it, and the words
+                            Alexa heard in reply. The skill sends the check-in after every answer, so a check-in that was cut off still shows what was said.
+                            It is matched to this participant by the Amazon account's email.<br><br><strong>Parents:</strong> Mind Guard does not ask
+                            parents yet; their check-ins will show under Parents once it does.</div></div>
+                </div>
+            </div>
+            <div class="pt-tabs-row">
+                <div class="mg-tabs" role="tablist" id="d-tabs" style="--mod: var(--mg-c-log)">
+                    <button class="mg-tab" role="tab" data-who="patient">Patient</button>
+                    <button class="mg-tab" role="tab" data-who="parent">Parents</button>
+                </div>
+                <div class="mg-jump" id="d-jump" aria-label="Go to a check-in" style="--mod: var(--mg-c-log)"></div>
+            </div>
+            <div class="pt-searchrow">
+                <i class="fas fa-magnifying-glass"></i>
+                <input id="d-search" type="search" placeholder="Search the conversation, e.g. tired" aria-label="Search the conversation">
+                <span class="mg-meta" id="d-count"></span>
+                <span class="mg-chip mg-chip--mod pt-dfilter" id="d-filter" hidden></span>
+            </div>
+            <div class="mg-card__body" id="d-log"></div>
+        </section>
+
+        <!-- E: results read from the log -->
+        <section class="mg-card mg-card--results pt-e" aria-label="Check-in results">
+            <div class="mg-card__head">
+                <h2 class="mg-title"><i class="fas fa-clipboard-check mg-card__icon"></i>Check-in results</h2>
+                <div class="mg-card__tools">
+                    <span class="mg-meta" id="e-range"></span>
+                    <div class="mg-source"><button type="button"><i class="fas fa-circle-info"></i>Source</button>
+                        <div class="mg-source__panel">Read from the Mind Guard check-ins in the range of the conversation history: under each measure is the
+                            question Mind Guard asks for it. Open a row to see, for every check-in, the exact questions and the words Alexa heard.
+                            The dot is red for severe, orange for moderate, green for mild or none, grey when it was not asked.
+                            <strong>Days</strong> counts from the first to the latest check-in in a row that reported it.
+                            <strong>Trend</strong> compares the two latest check-ins. These are the skill's own questions, not validated clinical scales,
+                            except the ASQ, the NIMH suicide-risk screen; a positive screen needs follow-up.</div></div>
+                </div>
+            </div>
+            <div class="mg-card__body mg-card__body--flush" id="e-table"></div>
+            <div class="mg-card__foot" id="e-call"></div>
+        </section>
     </main>
+    <div class="pt-menu" id="c-menu" role="menu" hidden></div>
+    <div class="pt-backdrop" id="d-backdrop" hidden></div>
+    {% if admin %}{% include '_participant_form.html' %}{% endif %}
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <script>
     (function () {
         const uid = {{ uid | tojson }};
+        const ADMIN = {{ 'true' if admin else 'false' }};        // study staff can edit; a participant only looks
+        const base = '/internal_web/patient/' + encodeURIComponent(uid);
         const $ = (id) => document.getElementById(id);
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        $('pt-tz').textContent = 'Times in ' + tz;
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-        // Dates are local calendar days of whoever is viewing.
+        // ---- dates: local calendar days of whoever is viewing; weeks run Sunday to Saturday like the calendar
         const pad = (n) => String(n).padStart(2, '0');
         const ymd = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
         const parseYmd = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
         const addDays = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
-        const timeOf = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-        const dateTimeOf = (sec) => sec ? new Date(sec * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '–';
-        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const today = () => ymd(new Date());
+        const weekStart = (s) => addDays(s, -parseYmd(s).getDay());
+        const hm = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dayLabel = (d) => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const longDay = (d) => d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+        const ago = (d) => {
+            const h = (Date.now() - d.getTime()) / 3600000;
+            if (h < 0.05) return 'just now';
+            if (h < 1) return Math.max(1, Math.round(h * 60)) + ' min ago';
+            if (h < 24) return Math.floor(h) + ' h ago';
+            const n = Math.floor(h / 24); return n === 1 ? '1 day ago' : n + ' days ago';
+        };
+        const fmt = (v, dp) => (dp ? v.toFixed(dp) : Math.round(v).toLocaleString());
+        const mins = (m) => Math.floor(m / 60) + ' h ' + pad(Math.round(m % 60)) + ' m';
+        const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
 
-        let current = {{ initial_date | tojson }} || ymd(new Date());
-        let loadId = 0;
+        const state = { date: {{ initial_date | tojson }} || today(), cRange: 'week', dRange: 'week', tab: 'sleep', who: 'patient',
+                        month: null, cache: {}, cOn: { sleep: ['hours', 'hr', 'times', 'naps'], heart: ['heart_rate', 'stress', 'body_battery'] }, cards: null, lastC: null,
+                        range: null, picking: null, calCache: {} };
+        $('pt-tz').textContent = 'Times in ' + tz;
 
-        function setUrl(replace) {
-            const url = '/internal_web/patient/' + encodeURIComponent(uid) + '?date=' + current;
-            (replace ? history.replaceState : history.pushState).call(history, { date: current }, '', url);
+        // A custom range (from, to: YYYY-MM-DD, both days included) picked on the calendar; up to 31 days, kept in the URL.
+        const RANGE_MAX_DAYS = 31;
+        const YMD_RX = /^\d{4}-\d{2}-\d{2}$/;
+        function rangeFromUrl(params) {
+            const f = params.get('from'), t = params.get('to');
+            if (!YMD_RX.test(f || '') || !YMD_RX.test(t || '') || f > t) return null;
+            return daysBetween(f, t) + 1 <= RANGE_MAX_DAYS ? { from: f, to: t } : null;
+        }
+        function daysBetween(a, b) { return Math.round((parseYmd(b) - parseYmd(a)) / 86400000); }
+        {
+            const r = rangeFromUrl(new URLSearchParams(location.search));
+            if (r) { state.range = r; state.cRange = state.dRange = 'range'; }
         }
 
-        async function load() {
-            const id = ++loadId;
-            $('pt-date').value = current;
-            $('pt-next').disabled = current >= ymd(new Date());
-            const start = parseYmd(current), end = parseYmd(addDays(current, 1));   // local midnight to midnight
-            $('pt-wear').innerHTML = $('pt-log').innerHTML = '<div class="pt-empty">Loading…</div>';
-            $('pt-wear-count').textContent = $('pt-log-count').textContent = '';
-            let data;
+        function rangeOf(kind, date) {
+            if (kind === 'range' && state.range) return { start: parseYmd(state.range.from), end: parseYmd(addDays(state.range.to, 1)) };
+            const s = kind === 'week' ? weekStart(date) : date;
+            return { start: parseYmd(s), end: parseYmd(addDays(s, kind === 'week' ? 7 : 1)) };
+        }
+        const whenText = (kind, date) => kind === 'week' ? 'this week' : kind === 'range' ? 'in this range' : 'on ' + dayLabel(parseYmd(date));
+        function daysOf(kind, date) {
+            const r = rangeOf(kind, date), out = [];
+            for (let x = new Date(r.start); x < r.end; x.setDate(x.getDate() + 1)) out.push(ymd(x));
+            return out;
+        }
+        function rangeText(kind, date) {
+            if (kind === 'day') return longDay(parseYmd(date));
+            const r = rangeOf(kind, date), last = new Date(r.end - 1);
+            if (+last === +r.start) return dayLabel(r.start);
+            return dayLabel(r.start) + ' – ' + (last.getMonth() === r.start.getMonth() ? last.getDate() : dayLabel(last));
+        }
+        // ---- which metric cards show, in order; kept in this browser. The extra ones are fetched only when shown.
+        const DEFAULT_CARDS = ['sleep', 'heart_rate', 'steps', 'respiration', 'stress', 'body_battery'];
+        const EXTRA_KEYS = ['hrv', 'worn', 'phone_battery'];
+        const TAB_OF = { sleep: 'sleep', heart_rate: 'heart', stress: 'heart', body_battery: 'heart', respiration: 'breath', steps: 'activity',
+                         hrv: 'hrv', worn: 'worn', phone_battery: 'phone_battery' };
+        const EXTRA_TAB = { hrv: ['HRV', '--mg-c-log'], worn: ['Watch worn', '--mg-c-info'], phone_battery: ['Phone battery', '--mg-c-battery'] };
+        function loadCards() {
             try {
-                const r = await fetch('/internal_web/patient/' + encodeURIComponent(uid) + '/data?start=' +
-                    encodeURIComponent(start.toISOString()) + '&end=' + encodeURIComponent(end.toISOString()));
-                if (r.redirected || r.status === 401) { location.href = '/internal_web/login'; return; }
-                data = await r.json();
-                if (!data.success) throw new Error(data.error || 'failed');
-            } catch (e) {
-                if (id === loadId) $('pt-wear').innerHTML = $('pt-log').innerHTML = '<div class="pt-empty text-danger">Could not load: ' + esc(e.message) + '</div>';
-                return;
+                const v = JSON.parse(localStorage.getItem('mg.cards'));
+                if (Array.isArray(v) && v.every((k) => k in TAB_OF)) return [...new Set(v)];
+            } catch (e) { /* no saved choice */ }
+            return DEFAULT_CARDS.slice();
+        }
+        function saveCards() { try { localStorage.setItem('mg.cards', JSON.stringify(state.cards)); } catch (e) { /* kept for this page only */ } }
+        const extrasShown = () => state.cards.filter((k) => EXTRA_KEYS.includes(k));
+
+        async function getData(kind) {
+            const { start, end } = rangeOf(kind, state.date);
+            const extra = extrasShown().join(',');
+            const key = start.toISOString() + end.toISOString() + '|' + extra;
+            if (!state.cache[key]) {
+                state.cache[key] = fetch(base + '/data?start=' + encodeURIComponent(start.toISOString()) + '&end=' + encodeURIComponent(end.toISOString()) +
+                    '&tz=' + encodeURIComponent(tz) + (extra ? '&extra=' + encodeURIComponent(extra) : ''), { cache: 'no-store' }).then(async (r) => {
+                    if (r.status === 401) { location.href = '/internal_web/login'; throw new Error('not logged in'); }
+                    const d = await r.json(); if (!d.success) throw new Error(d.error || 'failed'); return d;
+                });
+                state.cache[key].catch(() => delete state.cache[key]);
             }
-            if (id !== loadId) return;                       // a newer day was picked meanwhile
-            const p = data.participant;
-            $('pt-email').textContent = p.email || 'not set';
-            $('pt-code').textContent = p.uid_code || '–';
-            $('pt-ping').textContent = dateTimeOf(p.last_phone_contact);
-            renderWearable(data.series, start, end);
-            renderLog(data.checkins);
+            return state.cache[key];
         }
 
-        function renderWearable(series, start, end) {
-            const box = $('pt-wear');
-            const withData = series.filter((s) => s.points.length);
-            $('pt-wear-count').textContent = withData.length ? withData.map((s) => s.points.length).reduce((a, b) => a + b, 0) + ' readings' : '';
-            if (!withData.length) {
-                box.innerHTML = '<div class="pt-empty"><i class="fas fa-circle-info me-1"></i>No watch data for this day yet.</div>';
-                return;
+        // ---- "Where does the data come from?" notes open on click
+        document.querySelectorAll('.mg-source > button').forEach((b) => b.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const box = b.parentElement, open = box.dataset.open === 'true';
+            document.querySelectorAll('.mg-source').forEach((x) => (x.dataset.open = 'false'));
+            box.dataset.open = String(!open);
+        }));
+        document.addEventListener('click', () => document.querySelectorAll('.mg-source').forEach((x) => (x.dataset.open = 'false')));
+
+        // ---- B: participant facts; anything missing says so
+        function renderInfo(p) {
+            $('pt-name').textContent = p.name || p.uid;
+            $('pt-demo').textContent = [p.age ? p.age + ' y.o.' : '', p.gender ? p.gender.replace(/_/g, ' ') : ''].filter(Boolean).join(' / ') || 'No profile';
+            $('pt-email').textContent = p.email || 'Not set';
+            $('pt-code').textContent = p.uid_code || 'None';
+            $('pt-ping').textContent = p.last_phone_contact ? new Date(p.last_phone_contact * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never';
+            const L = p.link || {};
+            const alexa = { connected: ['ok', 'Mind Guard connected'], waiting: ['warn', 'Mind Guard: no check-in yet'], no_email: ['danger', 'Mind Guard: no email'] }[L.alexa] || ['', 'Mind Guard: unknown'];
+            const watch = { receiving: ['ok', 'Watch receiving'], stale: ['warn', 'Watch: nothing in 3 days'], app_only: ['warn', 'App signed in, no watch data'], not_set_up: ['danger', 'Watch not set up'] }[L.watch] || ['', 'Watch: unknown'];
+            $('pt-link').innerHTML = [alexa, watch].map(([k, t]) => '<span class="mg-chip' + (k ? ' mg-chip--' + k : '') + '">' + esc(t) + '</span>').join('');
+            // Clinical facts nobody sends yet: entered by the study team. Missing ones say so, with a way to add them.
+            const C = p.clinical || {};
+            state.participant = p;
+            const missing = (what, focus) => '<span class="pt-missing">' + esc(what) + '</span>' + (ADMIN ? '<button type="button" class="pt-add" data-focus="' + focus + '">Add</button>' : '');
+            $('pt-injury').innerHTML = C.injury_date ? esc(parseYmd(C.injury_date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })) : missing('No date of injury entered yet', 'clinical');
+            $('pt-phase').innerHTML = p.phase ? esc(p.phase.name) + ' <span class="pt-missing">(' + p.phase.days + ' day' + (p.phase.days === 1 ? '' : 's') + ')</span>'
+                : '<span class="pt-missing">Needs the date of injury</span>';
+            $('pt-psych').innerHTML = C.psych_history ? esc({ yes: 'Yes', no: 'No', unknown: 'Unknown' }[C.psych_history]) + (C.psych_note ? ' <span class="pt-missing">' + esc(C.psych_note) + '</span>' : '')
+                : missing('Not entered yet', 'clinical');
+            $('pt-mh').innerHTML = C.mh_prescriptions != null ? esc(C.mh_prescriptions) + (C.mh_prescription_names ? ' <span class="pt-missing">' + esc(C.mh_prescription_names) + '</span>' : '')
+                : missing('Not entered yet', 'clinical');
+            $('pt-phone').innerHTML = p.phone || p.parent_phone ? esc((p.phone || '–') + ' / ' + (p.parent_phone || '–')) : '<span class="pt-missing">Not collected in this study yet</span>';
+            document.querySelectorAll('.pt-add[data-focus]').forEach((b) => (b.onclick = () => editProfile(b.dataset.focus)));
+        }
+        function editProfile(focus) {
+            const p = state.participant || {};
+            mgEditParticipant({ uid, email: p.email, profile: Object.assign({ name: p.name, age: p.age, gender: p.gender }, p.clinical || {}), focus,
+                                onSaved: () => { state.cache = {}; renderAll(); } });
+        }
+        if ($('pt-edit')) $('pt-edit').onclick = () => editProfile('profile');
+        function renderSince(lastCheckin, lastWatch) {
+            const c = lastCheckin ? new Date(lastCheckin) : null, w = lastWatch ? new Date(lastWatch * 1000) : null;
+            const tone = (d) => !d ? 'danger' : (Date.now() - d) / 86400000 >= 2 ? 'warn' : 'ok';
+            $('pt-since').innerHTML =
+                '<span class="mg-chip mg-chip--' + tone(c) + '"><i class="fas fa-comments"></i>' + (c ? 'Last check-in: ' + esc(ago(c)) : 'No check-in yet') + '</span>' +
+                '<span class="mg-chip mg-chip--' + tone(w) + '"><i class="fas fa-heart-pulse"></i>' + (w ? 'Last watch data: ' + esc(ago(w)) : 'No watch data yet') + '</span>';
+        }
+
+        // ---- A: calendar. The chosen week is a light band, the chosen day solid.
+        async function renderCalendar() {
+            const m = state.month, first = new Date(m.getFullYear(), m.getMonth(), 1);
+            const gridStart = new Date(first); gridStart.setDate(1 - first.getDay());
+            const gridEnd = new Date(gridStart); gridEnd.setDate(gridStart.getDate() + 42);
+            $('cal-title').textContent = m.toLocaleDateString([], { month: 'short', year: 'numeric' });
+            $('cal-next').disabled = new Date(m.getFullYear(), m.getMonth() + 1, 1) > new Date();
+            let chat = new Set(), watch = new Set();
+            const ck = gridStart.toISOString();
+            try {
+                state.calCache[ck] = state.calCache[ck] || fetch(base + '/calendar?start=' + encodeURIComponent(ck) + '&end=' + encodeURIComponent(gridEnd.toISOString()), { cache: 'no-store' }).then((r) => r.json());
+                const d = await state.calCache[ck];
+                if (d.success) {
+                    chat = new Set(d.checkins.map((s) => ymd(new Date(s))));
+                    watch = new Set(d.watch_hours.map((h) => ymd(new Date(h * 1000))));
+                    renderSince(d.last_checkin, d.last_watch);
+                } else delete state.calCache[ck];
+            } catch (e) { delete state.calCache[ck]; /* the grid still shows, without dots */ }
+            // The band follows what panel C shows: the custom range when "Range" is on, otherwise the chosen day's week.
+            const t = today(), showRange = !!state.range && state.cRange === 'range';
+            const bs = showRange ? state.range.from : weekStart(state.date), be = showRange ? state.range.to : addDays(weekStart(state.date), 6);
+            $('cal').dataset.picking = String(!!state.picking);
+            $('cal-range').setAttribute('aria-pressed', String(!!state.picking));
+            let cells = ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d) => '<div class="mg-cal__dow">' + d + '</div>').join('');
+            for (let i = 0; i < 42; i++) {
+                const d = new Date(gridStart); d.setDate(gridStart.getDate() + i);
+                const k = ymd(d), inBand = k >= bs && k <= be;
+                const pos = bs === be ? 'one' : k === bs ? 'first' : k === be ? 'last' : 'true';
+                cells += '<button class="mg-cal__day" data-d="' + k + '" aria-pressed="' + (k === state.date && !state.picking) + '"' +
+                    (inBand ? (showRange ? ' data-range="' + pos + '"' : ' data-week="' + (pos === 'one' ? 'true' : pos) + '"') : '') +
+                    (state.picking && state.picking.first === k ? ' data-pick="true"' : '') +
+                    (d.getMonth() !== m.getMonth() ? ' data-out="true"' : '') + (k === t ? ' data-today="true"' : '') + (k > t ? ' disabled' : '') +
+                    ' title="' + esc(d.toDateString() + (chat.has(k) ? ' · check-in' : '') + (watch.has(k) ? ' · watch data' : '') + (!chat.has(k) && !watch.has(k) && k <= t ? ' · no data' : '')) + '">' +
+                    '<span class="mg-cal__num">' + d.getDate() + '</span><span class="mg-cal__dots"><i class="' + (chat.has(k) ? 'chat' : '') + '"></i><i class="' +
+                    (watch.has(k) ? 'watch' : '') + '"></i></span></button>';
             }
-            const stats = withData.map((s) => {
+            $('cal-grid').innerHTML = cells;
+            $('cal-grid').querySelectorAll('.mg-cal__day').forEach((b) => (b.onclick = () => (state.picking ? pickDay(b.dataset.d) : go(b.dataset.d))));
+            renderRangeBar();
+        }
+
+        // ---- custom range: the range button, then the first and the last day; the bar under the grid shows it and cancels it
+        function renderRangeBar(msg) {
+            const bar = $('cal-rangebar');
+            if (state.picking) {
+                bar.hidden = false;
+                bar.innerHTML = '<i class="fas fa-arrows-left-right"></i><span>' + (msg ? '<span class="mg-error">' + esc(msg) + '</span>' :
+                    state.picking.first ? 'From ' + esc(dayLabel(parseYmd(state.picking.first))) + ': now pick the last day' : 'Pick the first day of the range') +
+                    '</span><button type="button" title="Stop picking" aria-label="Stop picking"><i class="fas fa-xmark"></i></button>';
+                bar.querySelector('button').onclick = () => { state.picking = null; renderCalendar(); };
+            } else if (state.range) {
+                const n = daysBetween(state.range.from, state.range.to) + 1;
+                bar.hidden = false;
+                bar.innerHTML = '<i class="fas fa-arrows-left-right"></i><span>Range ' + esc(rangeText('range', state.date)) + ' · ' + n + ' day' + (n === 1 ? '' : 's') +
+                    '</span><button type="button" title="Cancel the custom range" aria-label="Cancel the custom range"><i class="fas fa-xmark"></i></button>';
+                bar.querySelector('button').onclick = clearRange;
+            } else {
+                bar.hidden = true; bar.innerHTML = '';
+            }
+        }
+        function pickDay(k) {
+            if (!state.picking.first) { state.picking.first = k; renderCalendar(); return; }
+            const [from, to] = [state.picking.first, k].sort();
+            if (daysBetween(from, to) + 1 > RANGE_MAX_DAYS) { state.picking.first = null; renderCalendar().then(() => renderRangeBar('Up to ' + RANGE_MAX_DAYS + ' days. Pick the first day again.')); return; }
+            state.picking = null;
+            state.range = { from, to };
+            state.cRange = state.dRange = 'range';
+            if (state.date < from || state.date > to) state.date = to;      // the Day view stays inside the range
+            setUrl(false); renderAll();
+        }
+        function clearRange() {
+            state.range = null;
+            if (state.cRange === 'range') state.cRange = 'week';
+            if (state.dRange === 'range') state.dRange = 'week';
+            setUrl(false); renderAll();
+        }
+        $('cal-range').onclick = () => { state.picking = state.picking ? null : { first: null }; renderCalendar(); };
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.picking) { state.picking = null; renderCalendar(); } });
+        $('cal-prev').onclick = () => { state.month = new Date(state.month.getFullYear(), state.month.getMonth() - 1, 1); renderCalendar(); };
+        $('cal-next').onclick = () => { state.month = new Date(state.month.getFullYear(), state.month.getMonth() + 1, 1); renderCalendar(); };
+        $('cal-today').onclick = () => go(today());
+
+        // ---- C: watch
+        const KIND = {
+            heart_rate: { icon: 'fa-heart-pulse', cls: 'heart', dp: 0 },
+            steps: { icon: 'fa-person-walking', cls: 'steps', dp: 0 },
+            respiration: { icon: 'fa-lungs', cls: 'breath', dp: 1 },
+            stress: { icon: 'fa-bolt', cls: 'stress', dp: 0 },
+            body_battery: { icon: 'fa-battery-half', cls: 'battery', dp: 0 },
+            hrv: { icon: 'fa-wave-square', cls: 'hrv', dp: 0 },
+            worn: { icon: 'fa-clock', cls: 'worn', dp: 1 },
+            phone_battery: { icon: 'fa-mobile-screen', cls: 'phone', dp: 0 },
+        };
+        const CARD_LABEL = { sleep: 'Sleep (est.)', heart_rate: 'Heart rate', steps: 'Steps', respiration: 'Breathing rate', stress: 'Stress',
+                             body_battery: 'Body Battery', hrv: 'Heart rate variability', worn: 'Watch worn', phone_battery: 'Phone battery' };
+        function byDay(points, agg, days) {   // per local day; null where the day has no reading
+            const m = {};
+            points.forEach(([t, v]) => { const k = ymd(new Date(t * 1000)); (m[k] = m[k] || []).push(v); });
+            return days.map((k) => { const v = m[k]; if (!v) return null; return agg === 'sum' ? v.reduce((a, b) => a + b, 0) : mean(v); });
+        }
+        function nightsOf(sleep, days) {          // the main sleep that ends on each local day
+            return days.map((k) => sleep.filter((b) => b.kind === 'sleep' && ymd(new Date(b.end)) === k).sort((a, b) => b.minutes - a.minutes)[0] || null);
+        }
+        function metric(key, value, unit, sub) {
+            const K = key === 'sleep' ? { icon: 'fa-bed', cls: 'sleep' } : KIND[key];
+            return '<div class="mg-metric mg-metric--' + K.cls + '" data-key="' + key + '" role="button" tabindex="0" title="Show the trend below"' +
+                (TAB_OF[key] === state.tab ? ' aria-current="true"' : '') + '><div class="mg-metric__head"><i class="fas ' + K.icon + '"></i>' + esc(CARD_LABEL[key]) +
+                '<button type="button" class="pt-more" data-more="' + key + '" title="More" aria-label="More for ' + esc(CARD_LABEL[key]) + '"><i class="fas fa-ellipsis"></i></button></div><div>' +
+                (value == null ? '<span class="mg-value mg-value--none">No data</span>' : '<span class="mg-value">' + value + '</span><span class="mg-unit">' + esc(unit) + '</span>') +
+                '</div><div class="mg-subtitle">' + sub + '</div></div>';
+        }
+
+        async function renderC() {
+            const week = state.cRange !== 'day';         // a week or a custom range: several days
+            $('c-metrics').innerHTML = '<div class="mg-empty">Loading…</div>';
+            $('c-panel').innerHTML = '';
+            let d;
+            try { d = await getData(state.cRange); } catch (e) { $('c-metrics').innerHTML = '<div class="mg-empty mg-error">Could not load: ' + esc(e.message) + '</div>'; return; }
+            const p = d.participant;
+            renderInfo(p);
+            $('c-source').innerHTML = '<strong>Watch' + (p.wearable ? ' (' + esc(p.wearable) + ')' : '') + ' through the UbiWell Connect phone app.</strong> ' +
+                'The watch records heart rate, stress, Body Battery, breathing and steps; the phone syncs and uploads to the study server about every 2 hours, ' +
+                'so the latest readings can be a few hours old. Readings the watch could not take (off the wrist, moving) are left out, and a dashed line marks ' +
+                'a stretch with no readings: nothing is filled in.<br><br><strong>Sleep is estimated</strong>, not measured: minutes with the watch on, no movement, ' +
+                'and a heart rate below the waking level (5 bpm under the day\'s median, and at most 12 bpm above the lowest tenth of the readings), ' +
+                'joined across wake-ups of up to 20 minutes. At least 3 hours, mostly between 21:00 and 10:00, counts as the night\'s sleep; ' +
+                '20 to 120 minutes during the day counts as a nap. Without the watch on at night there is no estimate.';
+            const days = daysOf(state.cRange, state.date), t = today();
+            const sofar = days.filter((k) => k <= t).length;
+            const when = whenText(state.cRange, state.date);
+            const S = Object.fromEntries(d.series.map((s) => [s.key, s]));
+
+            const nights = nightsOf(d.sleep, days), okN = nights.filter(Boolean);
+            state.avail = d.available_extras || [];
+            function card(k) {
+                if (k === 'sleep') {
+                    if (week) return metric('sleep', okN.length ? (mean(okN.map((n) => n.minutes)) / 60).toFixed(1) : null, 'h / night',
+                        okN.length ? 'Average of ' + okN.length + ' of ' + sofar + ' night' + (sofar === 1 ? '' : 's') : 'No sleep found ' + when);
+                    const n = nights[0];
+                    return metric('sleep', n ? (n.minutes / 60).toFixed(1) : null, 'h',
+                        n ? 'Night ending ' + dayLabel(new Date(n.end)) + ', ' + hm(new Date(n.start)) + ' – ' + hm(new Date(n.end)) : 'No sleep found for the night ending ' + dayLabel(parseYmd(state.date)));
+                }
+                const s = S[k], K = KIND[k];
+                if (!s) return metric(k, null, '', EXTRA_KEYS.includes(k) && !state.avail.includes(k) ? 'Not sent for this participant' : 'No readings ' + when);
                 const vals = s.points.map((q) => q[1]);
-                const v = s.key === 'garmin_steps' ? vals.reduce((a, b) => a + b, 0) : vals.reduce((a, b) => a + b, 0) / vals.length;
-                return '<div class="pt-stat"><div class="v">' + Math.round(v) + ' <small class="text-muted">' + esc(s.unit) + '</small></div><div class="l">' +
-                    esc(s.key === 'garmin_steps' ? 'Steps (total)' : s.label + ' (avg)') + '</div></div>';
-            }).join('');
-            box.innerHTML = '<div class="pt-stats">' + stats + '</div>' + withData.map((s) => '<div class="pt-chart" id="chart-' + s.key + '"></div>').join('');
-            withData.forEach((s) => {
-                Plotly.newPlot('chart-' + s.key, [{
-                    x: s.points.map((q) => new Date(q[0] * 1000)), y: s.points.map((q) => q[1]),
-                    type: s.key === 'garmin_steps' ? 'bar' : 'scatter', mode: 'lines', line: { width: 1.5 },
-                    hovertemplate: '%{x|%H:%M}<br>%{y} ' + s.unit + '<extra></extra>',
-                }], {
-                    title: { text: s.label, font: { size: 13 }, x: 0, xanchor: 'left' },
-                    margin: { l: 40, r: 10, t: 28, b: 28 }, xaxis: { range: [start, end], tickformat: '%H:%M' },
-                    yaxis: { title: { text: s.unit, font: { size: 11 } } },
-                }, { responsive: true, displayModeBar: false });
+                const daily = byDay(s.points, s.agg, days), withData = daily.filter((v) => v != null).length;
+                const daysNote = week ? 'data on ' + withData + ' of ' + sofar + ' day' + (sofar === 1 ? '' : 's') : '';
+                if (!vals.length) return metric(k, null, s.unit, 'No readings ' + when);
+                const total = vals.reduce((a, b) => a + b, 0);
+                if (k === 'steps') return week ? metric(k, fmt(total / withData), 'a day', 'Daily average, ' + daysNote) : metric(k, fmt(total), s.unit, 'Total ' + when);
+                if (k === 'worn') return week ? metric(k, (total / 60 / sofar).toFixed(1), 'h a day', 'Average over ' + sofar + ' day' + (sofar === 1 ? '' : 's') + '; worn on ' + withData)
+                                              : metric(k, (total / 60).toFixed(1), 'h', 'On the wrist ' + when);
+                const lo = Math.min(...vals), hi = Math.max(...vals);
+                return metric(k, fmt(mean(vals), K.dp), s.unit, 'Average, range ' + fmt(lo, K.dp) + '–' + fmt(hi, K.dp) + (week ? '; ' + daysNote : ''));
+            }
+            const addable = DEFAULT_CARDS.filter((k) => !state.cards.includes(k)).concat(EXTRA_KEYS.filter((k) => state.avail.includes(k) && !state.cards.includes(k)));
+            $('c-metrics').innerHTML = state.cards.map(card).join('') +
+                '<button type="button" class="pt-addcard" id="c-add" title="' + (addable.length ? 'Add a measure' : 'Nothing else to add') + '"><i class="fas fa-plus"></i>Add</button>';
+            wireCards(addable);
+            if (!(state.tab in { sleep: 1, heart: 1, breath: 1, activity: 1, compliance: 1 }) && !extrasShown().includes(state.tab)) state.tab = 'sleep';
+            renderTabs();
+            state.lastC = { d, days, nights };
+            renderTab(d, days, nights);
+            renderQ(d.questionnaires || []);
+        }
+
+        // ---- metric card menus: "more" on a card (trend, hide), "+" to add a hidden or an extra measure
+        function openMenu(anchor, html) {
+            const m = $('c-menu'), r = anchor.getBoundingClientRect();
+            m.innerHTML = html; m.hidden = false;
+            const w = m.offsetWidth, h = m.offsetHeight;
+            m.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px';
+            m.style.top = (r.bottom + 4 + h > innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4) + 'px';
+            return m;
+        }
+        function closeMenu() { $('c-menu').hidden = true; }
+        document.addEventListener('click', (e) => { if (!e.target.closest('#c-menu, .pt-more, #c-add')) closeMenu(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+        window.addEventListener('resize', closeMenu);
+        function showTrend(k) {
+            state.tab = TAB_OF[k];
+            if (state.lastC) { renderTabs(); renderTab(state.lastC.d, state.lastC.days, state.lastC.nights); }
+            document.querySelectorAll('#c-metrics .mg-metric').forEach((c) => c.setAttribute('aria-current', String(TAB_OF[c.dataset.key] === state.tab)));
+        }
+        function wireCards(addable) {
+            document.querySelectorAll('#c-metrics .mg-metric').forEach((c) => {
+                c.onclick = (e) => { if (!e.target.closest('.pt-more')) showTrend(c.dataset.key); };
+                c.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showTrend(c.dataset.key); } };
+            });
+            document.querySelectorAll('#c-metrics .pt-more').forEach((b) => (b.onclick = (e) => {
+                e.stopPropagation();
+                const k = b.dataset.more;
+                const m = openMenu(b, '<button type="button" data-act="trend"><i class="fas fa-chart-line"></i>Show trend</button>' +
+                    '<button type="button" data-act="hide"><i class="fas fa-eye-slash"></i>Hide this card<small>Add it back with "+ Add"</small></button>');
+                m.querySelector('[data-act="trend"]').onclick = () => { closeMenu(); showTrend(k); };
+                m.querySelector('[data-act="hide"]').onclick = () => { closeMenu(); state.cards = state.cards.filter((x) => x !== k); saveCards(); renderC(); };
+            }));
+            $('c-add').onclick = (e) => {
+                e.stopPropagation();
+                const hidden = addable.filter((k) => DEFAULT_CARDS.includes(k)), extra = addable.filter((k) => EXTRA_KEYS.includes(k));
+                const item = (k, note) => '<button type="button" data-add="' + k + '"><i class="fas ' + (k === 'sleep' ? 'fa-bed' : KIND[k].icon) + '"></i><span>' + esc(CARD_LABEL[k]) +
+                    (note ? '<small>' + esc(note) + '</small>' : '') + '</span></button>';
+                const NOTE = { hrv: 'From the watch\'s beat-to-beat intervals', worn: 'Hours the watch was on the wrist', phone_battery: 'Reported by the phone app' };
+                const m = openMenu(e.currentTarget, (hidden.length ? '<span class="mg-label">Hidden</span>' + hidden.map((k) => item(k)).join('') : '') +
+                    (extra.length ? '<span class="mg-label">Also recorded for this participant</span>' + extra.map((k) => item(k, NOTE[k])).join('') : '') +
+                    (addable.length ? '' : '<button type="button" disabled>Nothing else is recorded for this participant</button>'));
+                m.querySelectorAll('[data-add]').forEach((b) => (b.onclick = () => { closeMenu(); state.cards.push(b.dataset.add); saveCards(); renderC(); }));
+            };
+        }
+        function renderTabs() {
+            const base4 = [['sleep', 'Sleep (estimated)', '--mg-c-sleep'], ['heart', 'Heart rate &amp; stress', '--mg-c-heart'], ['breath', 'Breathing', '--mg-c-breath'],
+                           ['activity', 'Physical activity', '--mg-c-steps'], ['compliance', 'Recommendation compliance', '--mg-c-results']];
+            const tabs = base4.concat(extrasShown().map((k) => [k, esc(EXTRA_TAB[k][0]), EXTRA_TAB[k][1]]));
+            $('c-tabs').innerHTML = tabs.map(([k, label, color]) => '<button class="mg-tab" role="tab" data-tab="' + k + '" style="--mod: var(' + color + ')" aria-selected="' + (k === state.tab) + '">' + label + '</button>').join('');
+            $('c-tabs').querySelectorAll('.mg-tab').forEach((b) => (b.onclick = () => {
+                state.tab = b.dataset.tab;
+                if (state.lastC) { renderTabs(); renderTab(state.lastC.d, state.lastC.days, state.lastC.nights); }
+                document.querySelectorAll('#c-metrics .mg-metric').forEach((c) => c.setAttribute('aria-current', String(TAB_OF[c.dataset.key] === state.tab)));
+            }));
+        }
+
+        // ---- Q: questionnaires (latest before the end of the range shown in C, and the one before it)
+        function renderQ(rows) {
+            const r = rangeOf(state.cRange, state.date);
+            $('q-range').textContent = 'Latest by ' + dayLabel(new Date(r.end - 1));
+            if (!rows.length) { $('q-table').innerHTML = '<div class="mg-empty" style="padding:.75rem 1rem">No questionnaires.</div>'; return; }
+            const arrow = (a, b) => a == null || b == null || a === b ? '' : b > a ? ' <i class="fas fa-arrow-up mg-trend--worse" title="Higher than the time before"></i>' : ' <i class="fas fa-arrow-down mg-trend--better" title="Lower than the time before"></i>';
+            $('q-table').innerHTML = '<table class="mg-table mg-table--sticky"><thead><tr><th>Name of scale</th><th>Score</th><th>Meaning</th><th></th></tr></thead><tbody>' + rows.map((q, i) => {
+                const L = q.latest, P = q.previous;
+                if (!L) return '<tr><td>' + esc(q.name) + ' <span class="mg-meta">(' + esc(q.scale) + ')</span></td><td colspan="3"><span class="pt-none">Not collected yet</span></td></tr>';
+                return '<tr><td>' + esc(q.name) + ' <span class="mg-meta">(' + esc(q.scale) + ')</span></td><td class="mg-num">' + (P && P.total != null ? esc(P.total) + ' → ' : '') +
+                    '<b>' + esc(L.total == null ? '?' : L.total) + '</b> / ' + q.max + arrow(P && P.total, L.total) + '<div class="mg-meta">' + esc(L.at ? dayLabel(new Date(L.at)) : '') + '</div></td>' +
+                    '<td>' + (L.band ? esc(L.band + ' ' + q.what) : '<span class="pt-none">No cut-off bands</span>') + '</td>' +
+                    '<td style="text-align:right">' + (L.items.length ? '<button class="mg-btn mg-btn--ghost mg-btn--sm" data-q="' + i + '">Show details</button>' : '') + '</td></tr>' +
+                    (L.items.length ? '<tr class="pt-detail" data-qrow="' + i + '" hidden><td colspan="4"><dl class="pt-qa">' + L.items.map((it) =>
+                        '<dt>' + esc(it.score == null ? '–' : it.score) + '</dt><dd>' + esc(it.question) + (it.answer ? ' <span class="mg-meta">(' + esc(it.answer) + ')</span>' : '') + '</dd>').join('') +
+                        '</dl>' + (L.source ? '<div class="mg-meta" style="margin-top:.4rem">Source: ' + esc(L.source) + '</div>' : '') + '</td></tr>' : '');
+            }).join('') + '</tbody></table>';
+            $('q-table').querySelectorAll('button[data-q]').forEach((b) => (b.onclick = () => { const row = $('q-table').querySelector('tr[data-qrow="' + b.dataset.q + '"]'); row.hidden = !row.hidden; }));
+        }
+
+        // Charts: a line never joins across missing readings. A faint dashed line bridges the gap instead,
+        // so a stretch without data reads as "no data", not as a value.
+        function gapped(points, bucket) {
+            const lim = Math.max(3 * bucket, 900), x = [], y = [], bx = [], by = [], lone = [];
+            points.forEach(([t, v], i) => {
+                if (i && t - points[i - 1][0] > lim) {
+                    const [pt, pv] = points[i - 1];
+                    x.push(new Date((pt + bucket) * 1000)); y.push(null);
+                    bx.push(new Date(pt * 1000), new Date(t * 1000), null); by.push(pv, v, null);
+                }
+                x.push(new Date(t * 1000)); y.push(v);
+            });
+            for (let i = 0; i < y.length; i++) if (y[i] != null && y[i - 1] == null && y[i + 1] == null) lone.push(i);   // a reading on its own shows as a dot
+            return { x, y, bx, by, lone };
+        }
+        function lineTraces(s, colorVar, axis) {
+            const g = gapped(s.points, s.bucket), color = css(colorVar), yaxis = axis || 'y';
+            const out = [{ x: g.x, y: g.y, name: s.label, type: 'scatter', mode: 'lines', line: { color, width: 1.6 }, yaxis, connectgaps: false,
+                           hovertemplate: '%{y:.0f} ' + s.unit + '<extra>' + s.label + '</extra>' }];
+            if (g.bx.length) out.push({ x: g.bx, y: g.by, type: 'scatter', mode: 'lines', line: { color, width: 1.4, dash: 'dash' }, opacity: .35,
+                                        yaxis, hoverinfo: 'skip', showlegend: false, connectgaps: false });
+            if (g.lone.length) out.push({ x: g.lone.map((i) => g.x[i]), y: g.lone.map((i) => g.y[i]), type: 'scatter', mode: 'markers', marker: { color, size: 4 },
+                                          yaxis, hoverinfo: 'skip', showlegend: false });
+            return out;
+        }
+        function dailyLine(xs, ys, colorVar, name, axis, unit) {   // one value a day; dashed across days without one
+            const color = css(colorVar), bx = [], by = [];
+            let last = -1;
+            ys.forEach((v, i) => { if (v == null) return; if (last >= 0 && i - last > 1) { bx.push(xs[last], xs[i], null); by.push(ys[last], v, null); } last = i; });
+            const out = [{ x: xs, y: ys, type: 'scatter', mode: 'lines+markers', name, yaxis: axis || 'y', line: { color }, marker: { size: 6 }, connectgaps: false,
+                           hovertemplate: '%{y:.0f} ' + unit + '<extra>' + name + '</extra>' }];
+            if (bx.length) out.push({ x: bx, y: by, type: 'scatter', mode: 'lines', line: { color, dash: 'dash', width: 1.4 }, opacity: .35, yaxis: axis || 'y', hoverinfo: 'skip', showlegend: false });
+            return out;
+        }
+        function noDataDays(days, values) {         // a faint dashed box and "No data" on days that have nothing (not on days still to come)
+            const t = today(), shapes = [], notes = [];
+            days.forEach((k, i) => {
+                if (values[i] != null || k > t) return;
+                const mid = parseYmd(k).getTime();
+                shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: new Date(mid - 0.36 * 86400000), x1: new Date(mid + 0.36 * 86400000), y0: 0, y1: 0.16,
+                              line: { color: css('--mg-line-strong'), width: 1, dash: 'dash' }, fillcolor: 'rgba(0,0,0,0)' });
+                notes.push({ x: new Date(mid), y: 0.08, xref: 'x', yref: 'paper', text: 'No data', showarrow: false, font: { size: 10, color: css('--mg-muted') } });
+            });
+            return { shapes, notes };
+        }
+        function gapBaseline(s) {                   // for bar charts over time: a dashed line along zero where there are no readings
+            const g = gapped(s.points, s.bucket), shapes = [];
+            for (let i = 0; i < g.bx.length; i += 3) shapes.push({ type: 'line', xref: 'x', yref: 'y', x0: g.bx[i], x1: g.bx[i + 1], y0: 0, y1: 0,
+                line: { color: css('--mg-line-strong'), width: 2, dash: 'dash' } });
+            return shapes;
+        }
+
+        function plotLayout(extra) {
+            const ink = css('--mg-muted'), grid = css('--mg-line');
+            return Object.assign({
+                margin: { l: 44, r: 44, t: 8, b: 28 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+                font: { family: css('--mg-font') || 'sans-serif', size: 11, color: ink }, showlegend: false, hovermode: 'x unified', autosize: true,
+                xaxis: { gridcolor: grid, linecolor: grid, zeroline: false }, yaxis: { gridcolor: grid, zeroline: false },
+            }, extra || {});
+        }
+        let chartObserver = null;
+        function plot(traces, layout) {
+            const el = $('c-chart');
+            Plotly.newPlot(el, traces.length ? traces : [{ x: [], y: [] }], layout, { responsive: true, displayModeBar: false });
+            if (chartObserver) chartObserver.disconnect();
+            chartObserver = new ResizeObserver(() => { if (el.isConnected) Plotly.Plots.resize(el); });
+            chartObserver.observe(el);
+        }
+        function bar(checkItems, note) {
+            return '<div class="pt-tabpanel__bar">' + (checkItems || '') + '<span class="mg-nodata-key">No data</span></div>' +
+                (note ? '<div class="mg-meta pt-note">' + note + '</div>' : '') + '<div class="pt-chart" id="c-chart"></div>';
+        }
+        function checks(tab, items) {
+            return '<div class="mg-checks">' + items.map(([k, label, color]) => '<label class="mg-check" style="--c:' + css(color) + '"><input type="checkbox" data-k="' + k + '"' +
+                (state.cOn[tab].includes(k) ? ' checked' : '') + '><span class="mg-swatch"></span>' + esc(label) + '</label>').join('') + '</div>';
+        }
+        function wireChecks(tab, d, days, nights) {
+            $('c-panel').querySelectorAll('.mg-check input').forEach((i) => (i.onchange = () => {
+                state.cOn[tab] = [...$('c-panel').querySelectorAll('.mg-check input:checked')].map((x) => x.dataset.k); renderTab(d, days, nights);
+            }));
+        }
+
+        function renderTab(d, days, nights) {
+            document.querySelectorAll('#c-tabs .mg-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === state.tab)));
+            const panel = $('c-panel'), S = Object.fromEntries(d.series.map((s) => [s.key, s])), week = state.cRange !== 'day';
+            const r = rangeOf(state.cRange, state.date), xr = [r.start, r.end], grid = css('--mg-line');
+            const xs = days.map((k) => parseYmd(k)), dayAxis = { type: 'date', tickformat: days.length > 10 ? '%b %d' : '%a %d', dtick: days.length > 10 ? undefined : 86400000, gridcolor: grid,
+                range: [new Date(r.start.getTime() - 43200000), new Date(r.end.getTime() - 43200000)] };
+            const timeAxis = { type: 'date', range: xr, tickformat: week ? '%a %d' : '%H:%M', gridcolor: grid };
+            if (state.tab === 'sleep') {
+                const on = state.cOn.sleep;
+                let note = '';
+                if (!week) {
+                    const n = nights[0], naps = d.sleep.filter((b) => b.kind === 'nap' && ymd(new Date(b.end)) === state.date);
+                    note = n ? 'Night ending ' + dayLabel(new Date(n.end)) + ': asleep ' + hm(new Date(n.start)) + ', awake ' + hm(new Date(n.end)) + ', ' + mins(n.minutes) +
+                        ' of sleep, ' + n.awake_minutes + ' min awake inside' + (n.avg_hr != null ? ', heart rate ' + Math.round(n.avg_hr) + ' bpm' : '') : 'No sleep found for this night.';
+                    if (naps.length) note += ' Naps: ' + naps.map((b) => hm(new Date(b.start)) + ' – ' + hm(new Date(b.end))).join(', ') + '.';
+                }
+                panel.innerHTML = bar(checks('sleep', [['hours', 'Sleep hours', '--mg-c-sleep'], ['hr', 'Heart rate during sleep', '--mg-c-heart'],
+                    ['times', 'Asleep and awake times', '--mg-c-results'], ['naps', 'Naps', '--mg-c-stress']]), esc(note));
+                wireChecks('sleep', d, days, nights);
+                const traces = [];
+                if (week) {
+                    const hours = nights.map((n) => n && +(n.minutes / 60).toFixed(2));
+                    const gaps = noDataDays(days, nights.map((n) => n || null));
+                    if (on.includes('hours')) traces.push({ x: xs, y: hours, type: 'bar', name: 'Sleep', marker: { color: css('--mg-c-sleep') },
+                        text: on.includes('times') ? nights.map((n) => n ? hm(new Date(n.start)) + '–' + hm(new Date(n.end)) : '') : undefined,
+                        textposition: 'outside', textfont: { size: 10, color: css('--mg-ink-2') }, cliponaxis: false,
+                        customdata: nights.map((n) => n ? [hm(new Date(n.start)), hm(new Date(n.end)), n.awake_minutes] : ['', '', '']),
+                        hovertemplate: '%{y:.1f} h, %{customdata[0]} – %{customdata[1]}, %{customdata[2]} min awake inside<extra>Sleep</extra>' });
+                    if (on.includes('naps')) {
+                        const nap = days.map((k) => d.sleep.filter((b) => b.kind === 'nap' && ymd(new Date(b.end)) === k).reduce((a, b) => a + b.minutes, 0) / 60);
+                        traces.push({ x: xs, y: nap.map((v) => v || null), type: 'bar', name: 'Naps', marker: { color: css('--mg-c-stress') }, hovertemplate: '%{y:.1f} h<extra>Naps</extra>' });
+                    }
+                    const hrs = nights.filter((n) => n && n.avg_hr != null).map((n) => n.avg_hr);
+                    if (on.includes('hr')) traces.push(...dailyLine(xs, nights.map((n) => n && n.avg_hr), '--mg-c-heart', 'Heart rate during sleep', 'y2', 'bpm'));
+                    plot(traces, plotLayout({ barmode: 'group', shapes: gaps.shapes, annotations: gaps.notes, xaxis: dayAxis,
+                        yaxis: { title: { text: 'hours' }, rangemode: 'tozero', gridcolor: grid },
+                        yaxis2: { title: { text: 'bpm' }, overlaying: 'y', side: 'right', showgrid: false,
+                                  range: hrs.length ? [Math.floor(Math.min(...hrs) / 10) * 10 - 10, Math.ceil(Math.max(...hrs) / 10) * 10 + 10] : [40, 100] } }));
+                } else {
+                    const shapes = d.sleep.filter((b) => (b.kind === 'sleep' && on.includes('hours')) || (b.kind === 'nap' && on.includes('naps'))).map((b) => ({
+                        type: 'rect', xref: 'x', yref: 'paper', x0: new Date(b.start), x1: new Date(b.end), y0: 0, y1: 1, line: { width: 0 },
+                        fillcolor: css(b.kind === 'sleep' ? '--mg-c-sleep' : '--mg-c-stress'), opacity: .16 }));
+                    if (on.includes('hr')) traces.push(...lineTraces(S.heart_rate, '--mg-c-heart'));
+                    plot(traces, plotLayout({ shapes, xaxis: { type: 'date', range: [new Date(r.start.getTime() - 6 * 3600000), r.end], tickformat: '%H:%M', gridcolor: grid },
+                        yaxis: { title: { text: 'bpm' }, gridcolor: grid } }));
+                }
+            } else if (state.tab === 'heart') {
+                panel.innerHTML = bar(checks('heart', [['heart_rate', 'Heart rate', '--mg-c-heart'], ['stress', 'Stress', '--mg-c-stress'], ['body_battery', 'Body Battery', '--mg-c-battery']]));
+                wireChecks('heart', d, days, nights);
+                const on = state.cOn.heart, traces = [];
+                if (on.includes('heart_rate')) traces.push(...lineTraces(S.heart_rate, '--mg-c-heart'));
+                if (on.includes('stress')) traces.push(...lineTraces(S.stress, '--mg-c-stress', 'y2'));
+                if (on.includes('body_battery')) traces.push(...lineTraces(S.body_battery, '--mg-c-battery', 'y2'));
+                plot(traces, plotLayout({ xaxis: timeAxis, yaxis: { title: { text: 'bpm' }, gridcolor: grid },
+                    yaxis2: { title: { text: 'score (0–100)' }, overlaying: 'y', side: 'right', range: [0, 100], showgrid: false } }));
+            } else if (state.tab === 'breath') {
+                panel.innerHTML = bar('<span class="mg-meta">Breathing rate while the watch could read it</span>');
+                plot(lineTraces(S.respiration, '--mg-c-breath'), plotLayout({ xaxis: timeAxis, yaxis: { title: { text: 'breaths / min' }, gridcolor: grid } }));
+            } else if (state.tab === 'compliance') {
+                // Recommendation compliance: estimated sleep against the sleep recommendation, steps against the
+                // activity one, and what the patient told Mind Guard about their plan. Nothing is assumed when no
+                // recommendation was entered.
+                const C = d.participant.clinical || {}, sleepT = C.sleep_target_hours, stepsT = C.steps_target;
+                const plan = (d.results.find((r) => r.key === 'plan') || { entries: [] }).entries;
+                const counts = { 'All of it': 0, 'Some of it': 0, 'None of it': 0 };
+                plan.forEach((e) => (counts[e.text] = (counts[e.text] || 0) + 1));
+                const planLine = plan.length ? 'Plan, as the patient told Mind Guard: all of it ' + counts['All of it'] + ', some ' + counts['Some of it'] + ', none ' + counts['None of it'] + '.'
+                    : 'No plan answers from Mind Guard ' + whenText(state.cRange, state.date) + '.';
+                const addBtn = ADMIN ? ' <button type="button" class="mg-btn mg-btn--sm" id="c-addrec"><i class="fas fa-plus"></i>Add recommendations</button>' : '';
+                if (!sleepT && !stepsT) {
+                    panel.innerHTML = '<div class="mg-empty"><i class="fas fa-circle-info"></i><span>No sleep or activity recommendation has been entered for this participant, ' +
+                        'so there is nothing to compare the watch data with.' + addBtn + '</span></div><div class="mg-meta pt-note">' + esc(planLine) + '</div>';
+                    if ($('c-addrec')) $('c-addrec').onclick = () => editProfile('recommendations');
+                    return;
+                }
+                const sleepH = nights.map((n) => n && +(n.minutes / 60).toFixed(2)), steps = byDay(S.steps.points, 'sum', days);
+                const met = (vals, target) => { const have = vals.filter((v) => v != null); return have.length ? have.filter((v) => v >= target).length + ' of ' + have.length : null; };
+                const parts = [];
+                if (sleepT) parts.push('Sleep ' + sleepT + ' h: ' + (met(sleepH, sleepT) ? 'met on ' + met(sleepH, sleepT) + ' nights with an estimate' : 'no sleep estimate to compare'));
+                else parts.push('No sleep recommendation entered');
+                if (stepsT) parts.push('Steps ' + Number(stepsT).toLocaleString() + ' a day: ' + (met(steps, stepsT) ? 'met on ' + met(steps, stepsT) + ' days with data' : 'no step data to compare'));
+                else parts.push('No activity recommendation entered');
+                panel.innerHTML = bar('<span class="mg-meta">' + esc(parts.join(' · ')) + '</span>' + (ADMIN ? '<button type="button" class="pt-add" id="c-addrec">Edit</button>' : ''),
+                    esc(planLine + (C.activity_note ? ' Activity plan: ' + C.activity_note : '')));
+                if ($('c-addrec')) $('c-addrec').onclick = () => editProfile('recommendations');
+                const traces = [], shapes = [];
+                const shade = (vals, target, color) => vals.map((v) => v != null && v >= target ? color : color + '66');
+                if (sleepT) {
+                    traces.push({ x: xs, y: sleepH, type: 'bar', name: 'Sleep (est.)', offsetgroup: 'a', marker: { color: shade(sleepH, sleepT, css('--mg-c-sleep')) }, hovertemplate: '%{y:.1f} h<extra>Sleep</extra>' });
+                    shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: sleepT, y1: sleepT, line: { color: css('--mg-c-sleep'), dash: 'dash', width: 1.5 } });
+                }
+                if (stepsT) {
+                    traces.push({ x: xs, y: steps, type: 'bar', name: 'Steps', offsetgroup: 'b', yaxis: 'y2', marker: { color: shade(steps, stepsT, css('--mg-c-steps')) }, hovertemplate: '%{y:,.0f} steps<extra>Steps</extra>' });
+                    shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y2', y0: stepsT, y1: stepsT, line: { color: css('--mg-c-steps'), dash: 'dash', width: 1.5 } });
+                }
+                plot(traces, plotLayout({ barmode: 'group', shapes, xaxis: dayAxis, showlegend: true, legend: { orientation: 'h', y: -0.15 },
+                    yaxis: { title: { text: 'sleep, hours' }, rangemode: 'tozero', gridcolor: grid },
+                    yaxis2: { title: { text: 'steps' }, overlaying: 'y', side: 'right', rangemode: 'tozero', showgrid: false } }));
+            } else if (state.tab === 'hrv') {
+                panel.innerHTML = bar('<span class="mg-meta">RMSSD of the watch\'s beat-to-beat intervals, ' + (week ? '10' : '5') + '-minute windows; higher is usually calmer</span>');
+                plot(S.hrv ? lineTraces(S.hrv, '--mg-c-log') : [], plotLayout({ xaxis: timeAxis, yaxis: { title: { text: 'ms (RMSSD)' }, rangemode: 'tozero', gridcolor: grid } }));
+            } else if (state.tab === 'phone_battery') {
+                panel.innerHTML = bar('<span class="mg-meta">Phone battery as the UbiWell app reports it; a flat phone cannot upload watch data</span>');
+                plot(S.phone_battery ? lineTraces(S.phone_battery, '--mg-c-battery') : [], plotLayout({ xaxis: timeAxis, yaxis: { title: { text: '%' }, range: [0, 100], gridcolor: grid } }));
+            } else if (state.tab === 'worn') {
+                panel.innerHTML = bar('<span class="mg-meta">' + (week ? 'Hours a day' : 'Minutes each hour') + ' the watch reported being on the wrist</span>');
+                const s = S.worn, color = css('--mg-c-info');
+                if (!s) plot([], plotLayout({ xaxis: week ? dayAxis : timeAxis }));
+                else if (week) {
+                    const y = byDay(s.points, 'sum', days).map((v) => v == null ? null : +(v / 60).toFixed(1)), gaps = noDataDays(days, y);
+                    plot([{ x: xs, y, type: 'bar', marker: { color }, hovertemplate: '%{y:.1f} h<extra>Worn</extra>' }],
+                        plotLayout({ shapes: gaps.shapes, annotations: gaps.notes, xaxis: dayAxis, yaxis: { title: { text: 'hours' }, range: [0, 24], gridcolor: grid } }));
+                } else {
+                    const per = {};
+                    s.points.forEach(([t, v]) => { const h = Math.floor(t / 3600) * 3600; per[h] = (per[h] || 0) + v; });
+                    const hs = Object.keys(per).map(Number).sort((a, b) => a - b);
+                    plot([{ x: hs.map((h) => new Date((h + 1800) * 1000)), y: hs.map((h) => per[h]), type: 'bar', marker: { color }, hovertemplate: '%{y} min<extra>Worn</extra>' }],
+                        plotLayout({ xaxis: timeAxis, yaxis: { title: { text: 'minutes' }, range: [0, 60], gridcolor: grid } }));
+                }
+            } else {
+                panel.innerHTML = bar('<span class="mg-meta">' + (week ? 'Steps per day' : 'Steps per minute') + '</span>');
+                const s = S.steps, color = css('--mg-c-steps');
+                if (week) {
+                    const y = byDay(s.points, 'sum', days), gaps = noDataDays(days, y);
+                    plot([{ x: xs, y, type: 'bar', name: 'Steps', marker: { color }, hovertemplate: '%{y:,.0f} steps<extra></extra>' }],
+                        plotLayout({ shapes: gaps.shapes, annotations: gaps.notes, xaxis: dayAxis, yaxis: { title: { text: 'steps per day' }, rangemode: 'tozero', gridcolor: grid } }));
+                } else {
+                    plot([{ x: s.points.map((q) => new Date(q[0] * 1000)), y: s.points.map((q) => q[1]), type: 'bar', name: 'Steps', marker: { color }, hovertemplate: '%{y:,.0f} steps<extra></extra>' }],
+                        plotLayout({ shapes: gapBaseline(s), xaxis: timeAxis, yaxis: { title: { text: 'steps per minute' }, rangemode: 'tozero', gridcolor: grid } }));
+                }
+            }
+        }
+        document.querySelectorAll('#c-tabs .mg-tab').forEach((b) => (b.onclick = () => { state.tab = b.dataset.tab; renderC(); }));
+
+        // ---- D: transcript, oldest first like a chat, with a date tag per check-in to jump to it
+        function scrollToCheckin(id, smooth) {
+            const log = $('d-log'), el = log.querySelector('[data-cid="' + CSS.escape(id) + '"]');
+            if (el) log.scrollTo({ top: el.offsetTop, behavior: smooth ? 'smooth' : 'auto' });
+        }
+        function markJump() {
+            const log = $('d-log'), items = [...log.querySelectorAll('.pt-checkin')];
+            let cur = items[0];
+            items.forEach((el) => { if (el.offsetTop <= log.scrollTop + 4) cur = el; });
+            if (log.scrollTop + log.clientHeight >= log.scrollHeight - 2 && items.length) cur = items[items.length - 1];
+            const j = $('d-jump');
+            j.querySelectorAll('button').forEach((b) => {
+                const on = !!cur && b.dataset.cid === cur.dataset.cid;
+                b.setAttribute('aria-current', String(on));
+                if (on && (b.offsetLeft < j.scrollLeft || b.offsetLeft + b.offsetWidth > j.scrollLeft + j.clientWidth)) j.scrollLeft = b.offsetLeft - j.clientWidth + b.offsetWidth;   // keep it in view
             });
         }
+        $('d-log').addEventListener('scroll', markJump, { passive: true });
 
-        function renderLog(checkins) {
-            const box = $('pt-log');
-            $('pt-log-count').textContent = checkins.length ? checkins.length + ' check-in' + (checkins.length > 1 ? 's' : '') : '';
-            if (!checkins.length) { box.innerHTML = '<div class="pt-empty">No Mind Guard check-in on this day.</div>'; return; }
-            box.innerHTML = checkins.map((c) => {
-                const urgent = (c.flags || []).filter((f) => f.level !== 'SUMMARY');
-                const notes = (c.flags || []).filter((f) => f.level === 'SUMMARY');
-                const asq = c.asq ? ['q1', 'q2', 'q3', 'q4'].filter((k) => k in c.asq).map((k) => k.toUpperCase() + ' ' + esc(c.asq[k])).join(' · ') : '';
-                return '<div class="mg-checkin">' +
-                    '<div class="mg-head"><span class="badge bg-primary">Mind Guard</span>' +
-                    '<span class="mg-status mg-status-' + esc(c.status) + '">' + esc(String(c.status).replace('_', ' ')) + '</span>' +
-                    '<span class="text-muted">' + timeOf(c.started_at) + (c.ended_at ? '–' + timeOf(c.ended_at) : '') + '</span>' +
-                    (c.private === false ? '<span class="badge bg-secondary">not private</span>' : '') + '</div>' +
-                    urgent.map((f) => '<div class="mg-flag mg-flag-' + esc(f.level) + '"><i class="fas fa-triangle-exclamation me-1"></i><strong>' +
-                        esc(f.level) + '</strong> ' + esc(f.note) + '</div>').join('') +
-                    (asq ? '<div class="mg-asq"><strong>ASQ screen:</strong> ' + asq + '</div>' : '') +
-                    (c.answers || []).map((a) => '<div class="mg-turn"><div class="mg-time">' + timeOf(a.at) + '</div><div><div class="mg-q">' +
-                        esc(a.question) + '</div><div class="mg-a">' + esc(a.answer) + '</div></div></div>').join('') +
-                    ((c.summary || []).length || notes.length ? '<details class="mg-summary"><summary>Summary (' + ((c.summary || []).length + notes.length) + ')</summary><ul class="mb-0">' +
-                        (c.summary || []).map((s) => '<li>' + esc(s) + '</li>').join('') + notes.map((f) => '<li>' + esc(f.note) + '</li>').join('') + '</ul></details>' : '') +
-                    '</div>';
-            }).join('');
+        async function renderDE() {
+            $('d-log').innerHTML = '<div class="mg-empty">Loading…</div>';
+            $('d-jump').innerHTML = '';
+            $('e-table').innerHTML = '';
+            document.querySelectorAll('#d-tabs .mg-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.who === state.who)));
+            $('e-range').textContent = rangeText(state.dRange, state.date);
+            let d;
+            try { d = await getData(state.dRange); } catch (e) { $('d-log').innerHTML = '<div class="mg-empty mg-error">Could not load: ' + esc(e.message) + '</div>'; return; }
+            const list = d.checkins.filter((c) => (c.respondent || 'patient') === state.who).sort((a, b) => (a.started_at || '').localeCompare(b.started_at || ''));
+            if (!list.length) {
+                $('d-log').innerHTML = '<div class="mg-empty" style="padding-top:.75rem"><i class="fas fa-circle-info"></i>' + (state.who === 'parent'
+                    ? 'No parent check-ins. Mind Guard does not ask parents yet; their answers will show here once it does.'
+                    : 'No Mind Guard check-in ' + whenText(state.dRange, state.date) + '.') + '</div>';
+            } else {
+                const perDay = {};
+                list.forEach((c) => { const k = ymd(new Date(c.started_at)); perDay[k] = (perDay[k] || 0) + 1; });
+                $('d-jump').innerHTML = list.map((c) => {
+                    const s = new Date(c.started_at), k = ymd(s);
+                    const short = (s.getHours() % 12 || 12) + ':' + pad(s.getMinutes()) + (s.getHours() < 12 ? 'a' : 'p');
+                    const label = s.toLocaleDateString([], { weekday: 'short' }) + ' ' + s.getDate() + (perDay[k] > 1 || state.dRange === 'day' ? ' · ' + short : '');
+                    const urgent = (c.flags || []).some((f) => f.level === 'EMERG' || f.level === 'SAME-DAY');
+                    return '<button type="button" data-cid="' + esc(c.checkin_id) + '" title="' + esc(longDay(s) + ', ' + hm(s)) + '">' +
+                        (urgent ? '<i class="fas fa-circle" style="color:var(--mg-danger)"></i>' : '') + esc(label) + '</button>';
+                }).join('');
+                $('d-log').innerHTML = list.map((c) => {
+                    const s = new Date(c.started_at), urgent = (c.flags || []).filter((f) => f.level !== 'SUMMARY');
+                    const status = { completed: 'ok', in_progress: 'info', stopped: '', abandoned: '', ended_safety: 'danger' }[c.status];
+                    return '<div class="pt-checkin" data-cid="' + esc(c.checkin_id) + '"><div class="pt-checkin__head"><span class="mg-chip mg-chip--mod"><i class="fas fa-robot"></i>Mind Guard</span>' +
+                        '<span class="mg-title" style="font-size:.8125rem">' + esc(longDay(s)) + ', ' + hm(s) + '</span>' +
+                        '<span class="mg-chip' + (status ? ' mg-chip--' + status : '') + '">' + esc(String(c.status).replace(/_/g, ' ')) + '</span>' +
+                        (c.private === false ? '<span class="mg-chip">not private</span>' : '') + '</div>' +
+                        urgent.map((f) => '<div class="mg-flag mg-flag--' + esc(f.level) + '"><i class="fas fa-triangle-exclamation"></i><span><strong>' + esc(f.level) + '</strong> ' + esc(f.note) + '</span></div>').join('') +
+                        summaryOf(c) +
+                        ((c.answers || []).length ? c.answers.map((a) => '<div class="pt-turn" data-at="' + esc(a.at || '') + '"><div class="pt-bubble pt-bubble--bot" data-text="' + esc(a.question) + '">' + esc(a.question) +
+                            '</div><div class="pt-bubble pt-bubble--me" data-text="' + esc(a.answer) + '">' + esc(a.answer) +
+                            '</div><div class="pt-turn__time">' + (a.at ? hm(new Date(a.at)) : '') + '</div></div>').join('') : '<div class="mg-empty">No answers recorded.</div>') + '</div>';
+                }).join('');
+                $('d-log').insertAdjacentHTML('afterbegin', '<div class="pt-ai"><i class="fas fa-wand-magic-sparkles"></i><span><strong>AI daily summary:</strong> not set up yet. ' +
+                    'Each check-in below shows Mind Guard\'s own summary of what was said.</span></div>');
+                $('d-jump').querySelectorAll('button').forEach((b) => (b.onclick = () => scrollToCheckin(b.dataset.cid, true)));
+                // open on the chosen day's check-in, or the latest one before it
+                const target = list.filter((c) => ymd(new Date(c.started_at)) <= state.date).pop() || list[0];
+                scrollToCheckin(target.checkin_id, false);
+                markJump();
+            }
+            state.dFilter = null;
+            applyFilters();
+            renderE(d.results);
+            renderCall(d.participant);
+        }
+        // Mind Guard's own summary of a check-in (what it read back to the patient); private items stay out
+        function summaryOf(c) {
+            const items = (c.summary || []).filter((s) => !String(s).startsWith('[private]'));
+            return items.length ? '<div class="pt-summary"><span class="mg-label">Mind Guard summary</span>' + esc(items.join('; ')) + '</div>' : '';
+        }
+        // Search and the "show in conversation" filter from E: hide turns that do not match, highlight the words
+        function applyFilters() {
+            const q = $('d-search').value.trim(), ql = q.toLowerCase(), f = state.dFilter;
+            const rx = q ? new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi') : null;
+            let n = 0;
+            document.querySelectorAll('#d-log .pt-checkin').forEach((ci) => {
+                let shown = 0;
+                ci.querySelectorAll('.pt-turn').forEach((t) => {
+                    const bubbles = [...t.querySelectorAll('.pt-bubble')];
+                    const text = bubbles.map((b) => b.dataset.text).join(' ').toLowerCase();
+                    const ok = (!f || f.ats.has(t.dataset.at)) && (!q || text.includes(ql));
+                    t.hidden = !ok;
+                    bubbles.forEach((b) => {
+                        const safe = esc(b.dataset.text);
+                        b.innerHTML = rx ? safe.replace(rx, (m) => { n += ok ? 1 : 0; return '<mark>' + m + '</mark>'; }) : safe;
+                    });
+                    if (ok) shown++;
+                });
+                ci.hidden = (!!q || !!f) && !shown;
+                ci.querySelectorAll('.pt-summary').forEach((s) => (s.hidden = !!f));
+            });
+            $('d-count').textContent = q ? n + ' match' + (n === 1 ? '' : 'es') : '';
+            const chip = $('d-filter');
+            chip.hidden = !f;
+            if (f) {
+                chip.innerHTML = 'Showing: ' + esc(f.label) + '<button type="button" title="Show the whole conversation" aria-label="Show the whole conversation"><i class="fas fa-xmark"></i></button>';
+                chip.querySelector('button').onclick = () => { state.dFilter = null; applyFilters(); };
+            }
+            markJump();
+        }
+        $('d-search').addEventListener('input', applyFilters);
+        function showInConversation(row) {
+            state.dFilter = { label: row.label, ats: new Set(row.entries.flatMap((e) => (e.qa || []).map((x) => x.at || ''))) };
+            applyFilters();
+            const first = $('d-log').querySelector('.pt-turn:not([hidden])');
+            if (first) $('d-log').scrollTo({ top: first.closest('.pt-checkin').offsetTop, behavior: 'smooth' });
+        }
+        // Expand the conversation to most of the window, and back
+        function setExpanded(on) {
+            document.querySelector('.pt-d').classList.toggle('pt-expanded', on);
+            $('d-backdrop').hidden = !on;
+            $('d-expand').setAttribute('aria-pressed', String(on));
+            $('d-expand').innerHTML = '<i class="fas ' + (on ? 'fa-down-left-and-up-right-to-center' : 'fa-up-right-and-down-left-from-center') + '"></i>';
+            $('d-expand').title = on ? 'Back to the dashboard layout' : 'Expand the conversation';
+        }
+        $('d-expand').onclick = () => setExpanded(!document.querySelector('.pt-d').classList.contains('pt-expanded'));
+        $('d-backdrop').onclick = () => setExpanded(false);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.querySelector('.pt-d.pt-expanded')) setExpanded(false); });
+        // Call buttons: a tel: link when a number is on file; otherwise they say there is none
+        function renderCall(p) {
+            if (!ADMIN) { $('e-call').hidden = true; return; }
+            const btn = (num, label) => num
+                ? '<a class="mg-btn mg-btn--danger mg-btn--sm" href="tel:' + esc(num) + '"><i class="fas fa-phone"></i>' + label + '</a>'
+                : '<button type="button" class="mg-btn mg-btn--sm" disabled title="No phone number on file"><i class="fas fa-phone"></i>' + label + '</button>';
+            $('e-call').innerHTML = (p.phone || p.parent_phone ? '' : '<span class="mg-meta" style="margin-right:auto">No phone numbers on file</span>') +
+                btn(p.parent_phone, 'Call the parents') + btn(p.phone, 'Call the patient');
+        }
+        document.querySelectorAll('#d-tabs .mg-tab').forEach((b) => (b.onclick = () => { state.who = b.dataset.who; renderDE(); }));
+
+        // ---- E: every measure, with the question it comes from; open a row for each check-in's questions and answers
+        function renderE(rows) {
+            if (state.who === 'parent') { $('e-table').innerHTML = '<div class="mg-empty" style="padding:1rem">Results are read from the patient\'s check-ins.</div>'; return; }
+            const arrow = (t) => t === 'worse' ? '<i class="fas fa-arrow-up mg-trend--worse" title="Worse than the check-in before"></i>' : t === 'better' ? '<i class="fas fa-arrow-down mg-trend--better" title="Better than the check-in before"></i>' : '';
+            const qa = (e) => (e.qa || []).length ? '<dl class="pt-qa">' + e.qa.map((x) => '<dt>Q</dt><dd>' + esc(x.question) + '</dd><dt>A</dt><dd class="pt-qa__a">“' + esc(x.answer) + '”</dd>').join('') + '</dl>' : '';
+            // Days: from the first to the latest check-in in an unbroken run (newest backwards) that reported it
+            const reported = (e) => e.severity && e.severity !== 'none';
+            const streak = (entries) => {
+                if (!entries.length || !reported(entries[0])) return null;
+                let first = entries[0];
+                for (const e of entries) { if (!reported(e)) break; first = e; }
+                return Math.round((parseYmd(ymd(new Date(entries[0].at))) - parseYmd(ymd(new Date(first.at)))) / 86400000) + 1;
+            };
+            const DOT = { high: ['red', 'Severe'], mid: ['orange', 'Moderate'], low: ['green', 'Mild'], none: ['green', 'None'] };
+            $('e-table').innerHTML = '<table class="mg-table mg-table--sticky"><thead><tr><th class="pt-dotcell"></th><th>Measure and question</th><th>Latest</th><th title="Days in a row it was reported">Days</th><th>Trend</th><th></th></tr></thead><tbody>' + rows.map((r, i) => {
+                const L = r.latest, days = L ? streak(r.entries) : null, dot = L ? DOT[L.severity] || DOT.none : ['grey', r.in_skill === false ? 'Mind Guard does not ask this yet' : 'Not asked'];
+                const latest = L ? '<span class="sev-' + esc(L.severity) + '">' + esc(L.text) + '</span><div class="mg-meta">' + esc(L.at ? dayLabel(new Date(L.at)) : '') + '</div>'
+                                 : r.in_skill === false ? '<span class="pt-none" title="This question is planned for Mind Guard; nothing has been asked yet">Not in Mind Guard yet</span>'
+                                 : '<span class="pt-none">Not asked</span>';
+                return '<tr><td class="pt-dotcell"><span class="mg-dot mg-dot--' + dot[0] + '" title="' + dot[1] + '"></span></td><td>' + esc(r.label) +
+                    '<div class="mg-meta pt-q" title="' + esc(r.question) + '">' + esc(r.question) + '</div></td><td>' + latest + '</td>' +
+                    '<td class="mg-num">' + (days ? days + (days === 1 ? ' day' : ' days') : '<span class="pt-none">/</span>') + '</td><td>' + arrow(r.trend) + '</td>' +
+                    '<td style="text-align:right;white-space:nowrap">' + (L ? '<button class="pt-inconv" data-conv="' + i + '" title="Show these answers in the conversation" aria-label="Show ' + esc(r.label) + ' in the conversation"><i class="fas fa-comments"></i></button>' +
+                        '<button class="mg-btn mg-btn--ghost mg-btn--sm" data-i="' + i + '">' + (r.entries.length > 1 ? 'All ' + r.entries.length : 'Answers') + '</button>' : '') + '</td></tr>' +
+                    (L ? '<tr class="pt-detail" data-row="' + i + '" hidden><td colspan="6">' + r.entries.map((e) => '<div class="pt-qa-entry"><div class="pt-qa-when">' +
+                        esc(e.at ? longDay(new Date(e.at)) + ', ' + hm(new Date(e.at)) : '') + ': <span class="sev-' + esc(e.severity) + '">' + esc(e.text) + '</span>' +
+                        (e.detail ? ' <span class="mg-meta">(' + esc(e.detail) + ')</span>' : '') + '</div>' + qa(e) + '</div>').join('') +
+                        '<div class="mg-meta" style="margin-top:.5rem">How it is read: ' + esc(r.reading) + '</div></td></tr>' : '');
+            }).join('') + '</tbody></table>';
+            $('e-table').querySelectorAll('button[data-i]').forEach((b) => (b.onclick = () => { const row = $('e-table').querySelector('tr[data-row="' + b.dataset.i + '"]'); row.hidden = !row.hidden; }));
+            $('e-table').querySelectorAll('button[data-conv]').forEach((b) => (b.onclick = () => showInConversation(rows[+b.dataset.conv])));
         }
 
-        function go(date) { if (!date) return; current = date; setUrl(false); load(); }
-        $('pt-prev').onclick = () => go(addDays(current, -1));
-        $('pt-next').onclick = () => go(addDays(current, 1));
-        $('pt-today').onclick = () => go(ymd(new Date()));
-        $('pt-date').onchange = (e) => go(e.target.value);
-        $('pt-patient').onchange = (e) => {           // same day, other patient
-            location.href = '/internal_web/patient/' + encodeURIComponent(e.target.value) + '?date=' + current;
+        // ---- range toggles (week of the chosen day, or the chosen day) and date changes from the calendar
+        // Week and Day always; Range only while a custom range is set
+        function paintSegs() {
+            document.querySelectorAll('.mg-seg').forEach((seg) => {
+                const which = seg.dataset.range;
+                const tight = (s) => s.replace(' – ', '–');
+                const opts = [['week', 'Week', tight(rangeText('week', state.date))], ['day', 'Day', dayLabel(parseYmd(state.date))]];
+                if (state.range) opts.push(['range', 'Range', tight(rangeText('range', state.date))]);
+                seg.innerHTML = opts.map(([v, name, when]) => '<button type="button" data-v="' + v + '" aria-pressed="' + (v === state[which + 'Range']) + '" title="' +
+                    esc(v === 'day' ? longDay(parseYmd(state.date)) : name + ' ' + when) + '">' + name + ' <span class="pt-seg-when">' + esc(when) + '</span></button>').join('');
+                seg.querySelectorAll('button').forEach((b) => (b.onclick = () => {
+                    state[which + 'Range'] = b.dataset.v; paintSegs();
+                    if (which === 'c') { renderC(); renderCalendar(); } else renderDE();
+                }));
+            });
+        }
+        function query() {
+            return '?date=' + state.date + (state.range ? '&from=' + state.range.from + '&to=' + state.range.to : '');
+        }
+        function setUrl(replace) {
+            (replace ? history.replaceState : history.pushState).call(history, { date: state.date, range: state.range }, '', base + query());
+            document.querySelectorAll('#plist a').forEach((a) => (a.href = '/internal_web/patient/' + encodeURIComponent(a.dataset.uid) + query()));
+        }
+        function renderAll() {
+            const sel = parseYmd(state.date);
+            if (!state.month || state.month.getMonth() !== sel.getMonth() || state.month.getFullYear() !== sel.getFullYear()) state.month = new Date(sel.getFullYear(), sel.getMonth(), 1);
+            paintSegs(); renderCalendar(); renderC(); renderDE();
+        }
+        function go(date) { if (!date || date > today()) return; state.date = date; setUrl(false); renderAll(); }
+        window.onpopstate = (e) => {
+            state.date = (e.state && e.state.date) || today();
+            state.range = (e.state && e.state.range) || null;
+            if (!state.range) { if (state.cRange === 'range') state.cRange = 'week'; if (state.dRange === 'range') state.dRange = 'week'; }
+            renderAll();
         };
-        window.onpopstate = (e) => { current = (e.state && e.state.date) || ymd(new Date()); load(); };
+        // charts take their colors from the theme; redraw when the system or the nav-bar switch changes it
+        if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { renderC(); renderCalendar(); });
+        document.addEventListener('mg-theme', () => { renderC(); renderCalendar(); });
 
+        state.cards = loadCards();
         setUrl(true);
-        load();
+        renderAll();
     })();
     </script>
 </body>

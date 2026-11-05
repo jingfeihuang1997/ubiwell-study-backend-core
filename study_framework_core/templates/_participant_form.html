@@ -1,0 +1,102 @@
+{# Edit a participant: profile, email (links Alexa), clinical facts and recommendations. Used on the
+   dashboard and the patient page: mgEditParticipant({uid, email, profile, focus, onSaved}). #}
+<dialog class="mg-dialog mg-pf" id="mgEditDialog" aria-labelledby="mgEditTitle">
+    <form method="dialog" id="mgEditForm" novalidate>
+        <div class="mg-dialog__body">
+            <h2 class="mg-title" id="mgEditTitle" style="font-size:1.05rem">Edit participant</h2>
+            <p class="mg-meta" id="mgEditUid" style="margin:.15rem 0 .75rem"></p>
+
+            <div class="mg-pf__section" data-sec="profile">
+                <div class="mg-label">Profile</div>
+                <div class="mg-pf__grid">
+                    <div class="mg-field"><label for="pf-name">Name</label><input class="mg-input" id="pf-name" name="name" maxlength="80"></div>
+                    <div class="mg-field"><label for="pf-age">Age</label><input class="mg-input" id="pf-age" name="age" type="number" min="5" max="120"></div>
+                    <div class="mg-field"><label for="pf-gender">Gender</label>
+                        <select class="mg-select" id="pf-gender" name="gender"><option value="">Not set</option><option value="female">Female</option><option value="male">Male</option>
+                            <option value="nonbinary">Nonbinary</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option></select></div>
+                    <div class="mg-field mg-pf__wide"><label for="pf-email">Email</label><input class="mg-input" id="pf-email" name="email" type="email" maxlength="254">
+                        <span class="mg-hint">The Amazon account they use for Alexa; Mind Guard check-ins are matched by it.</span></div>
+                </div>
+            </div>
+
+            <div class="mg-pf__section" data-sec="clinical">
+                <div class="mg-label">Clinical</div>
+                <div class="mg-pf__grid">
+                    <div class="mg-field"><label for="pf-injury">Date of injury</label><input class="mg-input" id="pf-injury" name="injury_date" type="date">
+                        <span class="mg-hint">Gives the phase: acute up to 14 days, subacute to 28.</span></div>
+                    <div class="mg-field"><label for="pf-psych">Individual psychiatric history</label>
+                        <select class="mg-select" id="pf-psych" name="psych_history"><option value="">Not entered</option><option value="yes">Yes</option><option value="no">No</option><option value="unknown">Unknown</option></select></div>
+                    <div class="mg-field mg-pf__wide"><label for="pf-psychnote">History note <span class="mg-meta">(optional)</span></label><input class="mg-input" id="pf-psychnote" name="psych_note" maxlength="300"></div>
+                    <div class="mg-field"><label for="pf-mh">Mental health prescriptions</label><input class="mg-input" id="pf-mh" name="mh_prescriptions" type="number" min="0" max="30" placeholder="Number"></div>
+                    <div class="mg-field"><label for="pf-mhnames">Which <span class="mg-meta">(optional)</span></label><input class="mg-input" id="pf-mhnames" name="mh_prescription_names" maxlength="300"></div>
+                </div>
+            </div>
+
+            <div class="mg-pf__section" data-sec="recommendations">
+                <div class="mg-label">Recommendations</div>
+                <div class="mg-pf__grid">
+                    <div class="mg-field"><label for="pf-sleep">Sleep, hours a night</label><input class="mg-input" id="pf-sleep" name="sleep_target_hours" type="number" min="4" max="14" step="0.5"></div>
+                    <div class="mg-field"><label for="pf-steps">Activity, steps a day</label><input class="mg-input" id="pf-steps" name="steps_target" type="number" min="1" max="50000" step="500"></div>
+                    <div class="mg-field mg-pf__wide"><label for="pf-actnote">Activity plan <span class="mg-meta">(optional, as told to the patient)</span></label><input class="mg-input" id="pf-actnote" name="activity_note" maxlength="300"></div>
+                </div>
+            </div>
+
+            <div class="mg-pf__section" data-sec="phone">
+                <div class="mg-label">Phone numbers</div>
+                <p class="mg-meta" style="margin:.25rem 0 0">Not collected in this study yet. When they are, the patient's and a parent's number go here and turn on the call buttons.</p>
+            </div>
+            <p class="mg-error" id="mgEditError" hidden></p>
+        </div>
+        <div class="mg-dialog__foot">
+            <button type="button" class="mg-btn" value="cancel" id="mgEditCancel">Cancel</button>
+            <button type="submit" class="mg-btn mg-btn--primary" id="mgEditSave">Save</button>
+        </div>
+    </form>
+</dialog>
+<style>
+    .mg-pf { width: min(640px, calc(100vw - 32px)); }
+    .mg-pf__section { padding: .75rem 0; border-top: 1px solid var(--mg-line); }
+    .mg-pf__section:first-of-type { border-top: 0; padding-top: 0; }
+    .mg-pf__section[data-focus="true"] { background: color-mix(in srgb, var(--mg-accent) 6%, transparent); margin: 0 -1.25rem; padding-left: 1.25rem; padding-right: 1.25rem; }
+    .mg-pf__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 .75rem; margin-top: .5rem; }
+    .mg-pf__wide { grid-column: 1 / -1; }
+    .mg-pf .mg-field { margin-bottom: .625rem; }
+    .mg-pf .mg-dialog__body { max-height: min(70vh, 720px); overflow-y: auto; }
+</style>
+<script>
+(function () {
+    const dlg = document.getElementById('mgEditDialog'), form = document.getElementById('mgEditForm');
+    const err = document.getElementById('mgEditError');
+    const FIELDS = ['name', 'age', 'gender', 'email', 'injury_date', 'psych_history', 'psych_note', 'mh_prescriptions',
+                    'mh_prescription_names', 'sleep_target_hours', 'steps_target', 'activity_note'];
+    let current = null;
+    window.mgEditParticipant = function (opts) {
+        current = opts;
+        const prof = Object.assign({}, opts.profile || {}, { email: opts.email || '' });
+        FIELDS.forEach((k) => { form.elements[k].value = prof[k] == null ? '' : prof[k]; });
+        form.elements.injury_date.max = new Date().toISOString().slice(0, 10);
+        document.getElementById('mgEditUid').textContent = 'Participant ID ' + opts.uid;
+        err.hidden = true;
+        dlg.querySelectorAll('.mg-pf__section').forEach((s) => (s.dataset.focus = String(s.dataset.sec === opts.focus)));
+        dlg.showModal();
+        const sec = opts.focus && dlg.querySelector('.mg-pf__section[data-sec="' + opts.focus + '"]');
+        if (sec) { sec.scrollIntoView({ block: 'nearest' }); const first = sec.querySelector('input, select'); if (first) first.focus(); }
+    };
+    document.getElementById('mgEditCancel').onclick = () => dlg.close();
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = {};
+        FIELDS.forEach((k) => (body[k] = form.elements[k].value.trim()));
+        const btn = document.getElementById('mgEditSave');
+        btn.disabled = true; err.hidden = true;
+        try {
+            const r = await fetch('/internal_web/participants/' + encodeURIComponent(current.uid) + '/profile', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const d = await r.json();
+            if (!d.success) throw new Error(d.error || 'Could not save');
+            dlg.close();
+            if (current.onSaved) current.onSaved(d.participant);
+        } catch (ex) { err.textContent = ex.message; err.hidden = false; } finally { btn.disabled = false; }
+    });
+})();
+</script>

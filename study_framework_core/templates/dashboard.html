@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mind Guard - Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    {% include '_theme.html' %}
+    <style>
+        .db-tools { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-left: auto; }
+        .db-search { width: 220px; }
+        .db-filters { display: inline-flex; gap: .25rem; flex-wrap: wrap; }
+        .db-filters button { appearance: none; font: inherit; font-size: .75rem; font-weight: 600; border: 1px solid var(--mg-line); background: var(--mg-panel);
+            color: var(--mg-muted); border-radius: 999px; padding: .25rem .65rem; cursor: pointer; white-space: nowrap; }
+        .db-filters button[aria-pressed="true"] { border-color: var(--mg-accent); color: var(--mg-accent); background: var(--mg-accent-soft); }
+        .db-filters b { font-variant-numeric: tabular-nums; margin-left: .2rem; }
+        .db-table td { padding-top: .9rem !important; padding-bottom: .9rem !important; vertical-align: top; }
+        .db-table th:nth-child(1) { width: 24%; } .db-table th:nth-child(2) { width: 15%; } .db-table th:nth-child(3) { width: 20%; } .db-table th:nth-child(4) { width: 29%; }
+        .db-name { font-weight: 600; color: var(--mg-ink); font-size: .875rem; }
+        .db-name a { color: inherit; text-decoration: none; } .db-name a:hover { color: var(--mg-accent); }
+        .db-sub { color: var(--mg-muted); font-size: .75rem; line-height: 1.5; word-break: break-word; }
+        .db-chips { display: flex; flex-direction: column; gap: .3rem; align-items: flex-start; }
+        .db-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+        .db-list li { display: flex; gap: .4rem; align-items: flex-start; font-size: .78rem; line-height: 1.4; color: var(--mg-ink-2); }
+        .db-list li .mg-dot { margin-top: .32rem; }
+        .db-who { font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: .1rem .35rem; border-radius: 5px; flex: none; margin-top: .05rem; }
+        .db-who--admin { background: var(--mg-accent-soft); color: var(--mg-accent); }
+        .db-who--participant { background: color-mix(in srgb, var(--mg-c-log) 14%, transparent); color: var(--mg-c-log); }
+        .db-list li.db-optional { color: var(--mg-muted); }
+        .db-none { color: var(--mg-muted); font-size: .78rem; }
+        .db-done { color: var(--mg-ok); font-size: .78rem; font-weight: 600; }
+        .db-actions { display: flex; gap: .3rem; justify-content: flex-end; flex-wrap: wrap; }
+        .db-row--request td { background: color-mix(in srgb, var(--mg-warn) 6%, transparent); }
+        .db-tabs { margin-bottom: .75rem; }
+        .db-result { font-size: .8125rem; }
+        .db-result code { font-size: .85rem; font-weight: 700; }
+        .mg-dot--orange { background: var(--mg-warn); }
+        @media (max-width: 899.98px) { .db-table thead { display: none; } .db-table, .db-table tbody, .db-table tr, .db-table td { display: block; width: 100%; }
+            .db-table tr { border-bottom: 1px solid var(--mg-line); } .db-table td { border: 0 !important; padding: .35rem .75rem !important; } .db-actions { justify-content: flex-start; } }
+    </style>
+</head>
+<body>
+    {% include 'navigation.html' %}
+    <main class="mg-page">
+        <div class="mg-page-head">
+            <div>
+                <h1 class="mg-h1">Dashboard</h1>
+                <p class="mg-subtitle">Every participant: when they last sent data, warnings from the last week, and what is still to do.</p>
+            </div>
+        </div>
+
+        <section class="mg-card" aria-label="Participants">
+            <div class="mg-card__head">
+                <h2 class="mg-title"><i class="fas fa-users mg-card__icon"></i>Participants</h2>
+                <div class="db-tools">
+                    <div class="db-filters" id="db-filters" role="group" aria-label="Show"></div>
+                    <input class="mg-input mg-input--sm db-search" id="db-search" type="search" placeholder="Search name, ID or email" aria-label="Search participants">
+                    <button class="mg-btn mg-btn--sm" id="db-refresh" title="Load the list again"><i class="fas fa-rotate"></i>Refresh</button>
+                    <button class="mg-btn mg-btn--sm" id="db-export" title="Download every participant as CSV"><i class="fas fa-file-export"></i>Export CSV</button>
+                </div>
+            </div>
+            <div class="mg-card__body mg-card__body--flush">
+                <table class="mg-table mg-table--sticky db-table">
+                    <thead><tr><th>Participant</th><th>Last data</th><th>Warnings (last 7 days)</th><th>To do</th><th></th></tr></thead>
+                    <tbody id="db-rows"><tr><td colspan="5"><div class="mg-empty">Loading…</div></td></tr></tbody>
+                </table>
+            </div>
+            <div class="mg-card__foot">
+                <button class="mg-btn mg-btn--primary" id="db-add"><i class="fas fa-user-plus"></i>Add participant</button>
+                <span class="mg-meta">Or they sign up themselves from the sign-in page; their request shows here for review.</span>
+            </div>
+        </section>
+    </main>
+
+    <!-- approve a sign-up -->
+    <dialog class="mg-dialog" id="db-approve" aria-labelledby="db-approve-title">
+        <form method="dialog" id="db-approve-form">
+            <div class="mg-dialog__body">
+                <h2 class="mg-title" id="db-approve-title" style="font-size:1.05rem">Approve sign-up</h2>
+                <p class="mg-body" id="db-approve-who" style="margin:.4rem 0 .75rem"></p>
+                <div id="db-approve-new">
+                    <div class="mg-field"><label for="db-ap-uid">Participant ID</label><input class="mg-input" id="db-ap-uid" maxlength="40">
+                        <span class="mg-hint">Letters, digits, dashes or underscores. Used for their data on the study server.</span></div>
+                    <div class="mg-field"><label for="db-ap-study">Study ID</label><input class="mg-input" id="db-ap-study" maxlength="4" value="{{ suggested_study_id }}">
+                        <span class="mg-hint">Starts their watch login code, like the newest participant's.</span></div>
+                </div>
+                <p class="mg-error" id="db-ap-error" hidden></p>
+            </div>
+            <div class="mg-dialog__foot"><button type="button" class="mg-btn" id="db-ap-cancel">Cancel</button><button type="submit" class="mg-btn mg-btn--primary" id="db-ap-ok">Approve</button></div>
+        </form>
+    </dialog>
+
+    <!-- add participants: one with the same details as the sign-up form, or several with only an ID pattern -->
+    <dialog class="mg-dialog" id="db-new" aria-labelledby="db-new-title" style="width:min(560px, calc(100vw - 32px))">
+        <form method="dialog" id="db-new-form" novalidate>
+            <div class="mg-dialog__body">
+                <h2 class="mg-title" id="db-new-title" style="font-size:1.05rem;margin-bottom:.5rem">Add participants</h2>
+                <div class="mg-tabs db-tabs" role="tablist"><button type="button" class="mg-tab" role="tab" data-mode="one" aria-selected="true">One participant</button>
+                    <button type="button" class="mg-tab" role="tab" data-mode="many" aria-selected="false">Several at once</button></div>
+                <div data-pane="one">
+                    <div class="mg-pf__grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:0 .75rem">
+                        <div class="mg-field"><label for="db-n-name">Name</label><input class="mg-input" id="db-n-name" maxlength="80"></div>
+                        <div class="mg-field"><label for="db-n-age">Age</label><input class="mg-input" id="db-n-age" type="number" min="5" max="120"></div>
+                        <div class="mg-field"><label for="db-n-gender">Gender</label><select class="mg-select" id="db-n-gender"><option value="">Not set</option><option value="female">Female</option>
+                            <option value="male">Male</option><option value="nonbinary">Nonbinary</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option></select></div>
+                    </div>
+                    <div class="mg-field"><label for="db-n-email">Email</label><input class="mg-input" id="db-n-email" type="email" maxlength="254">
+                        <span class="mg-hint">The Amazon account they use for Alexa (Mind Guard links check-ins by it). Can be added later.</span></div>
+                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:0 .75rem">
+                        <div class="mg-field"><label for="db-n-uid">Participant ID</label><input class="mg-input" id="db-n-uid" maxlength="40" placeholder="e.g. mg_sam01"></div>
+                        <div class="mg-field"><label for="db-n-study">Study ID</label><input class="mg-input" id="db-n-study" maxlength="4" value="{{ suggested_study_id }}"></div>
+                    </div>
+                </div>
+                <div data-pane="many" hidden>
+                    <p class="mg-meta" style="margin:0 0 .6rem">Creates IDs like prefix001, prefix002… Add each one's email and profile afterwards from the list.</p>
+                    <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:0 .75rem">
+                        <div class="mg-field"><label for="db-m-prefix">ID prefix</label><input class="mg-input" id="db-m-prefix" maxlength="30" placeholder="e.g. mg_"></div>
+                        <div class="mg-field"><label for="db-m-count">How many</label><input class="mg-input" id="db-m-count" type="number" min="1" max="100" value="5"></div>
+                        <div class="mg-field"><label for="db-m-start">Start at</label><input class="mg-input" id="db-m-start" type="number" min="1" value="1"></div>
+                        <div class="mg-field"><label for="db-m-study">Study ID</label><input class="mg-input" id="db-m-study" maxlength="4" value="{{ suggested_study_id }}"></div>
+                    </div>
+                </div>
+                <p class="mg-error" id="db-n-error" hidden></p>
+                <div class="db-result" id="db-n-result" hidden></div>
+            </div>
+            <div class="mg-dialog__foot"><button type="button" class="mg-btn" id="db-n-cancel">Close</button><button type="submit" class="mg-btn mg-btn--primary" id="db-n-ok">Create</button></div>
+        </form>
+    </dialog>
+
+    {% include '_participant_form.html' %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    (function () {
+        const $ = (id) => document.getElementById(id);
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const ago = (d) => {
+            const h = (Date.now() - d.getTime()) / 3600000;
+            if (h < 0.05) return 'just now';
+            if (h < 1) return Math.max(1, Math.round(h * 60)) + ' min ago';
+            if (h < 24) return Math.floor(h) + ' h ago';
+            const n = Math.floor(h / 24); return n === 1 ? '1 day ago' : n + ' days ago';
+        };
+        const tone = (d) => !d ? 'danger' : (Date.now() - d) / 86400000 >= 2 ? 'warn' : 'ok';
+        const state = { rows: [], filter: 'all', q: '', study: {{ suggested_study_id | tojson }} };
+
+        async function load() {
+            try {
+                const r = await fetch('/internal_web/participants', { cache: 'no-store' });
+                if (r.status === 401) { location.href = '/internal_web/login'; return; }
+                const d = await r.json();
+                if (!d.success) throw new Error(d.error || 'failed');
+                state.rows = d.rows; state.study = d.suggested_study_id || state.study;
+                render();
+            } catch (e) { $('db-rows').innerHTML = '<tr><td colspan="5"><div class="mg-empty mg-error">Could not load: ' + esc(e.message) + '</div></td></tr>'; }
+        }
+
+        const FILTERS = [['all', 'All', () => true], ['review', 'Needs review', (r) => r.type === 'request'],
+                         ['todo', 'To do', (r) => (r.todos || []).some((t) => !t.optional)], ['warn', 'Warnings', (r) => (r.warnings || []).length]];
+        function render() {
+            $('db-filters').innerHTML = FILTERS.map(([k, label, f]) => '<button type="button" data-f="' + k + '" aria-pressed="' + (state.filter === k) + '">' + label +
+                '<b>' + state.rows.filter(f).length + '</b></button>').join('');
+            $('db-filters').querySelectorAll('button').forEach((b) => (b.onclick = () => { state.filter = b.dataset.f; render(); }));
+            const f = FILTERS.find((x) => x[0] === state.filter)[2], q = state.q.toLowerCase();
+            const rows = state.rows.filter(f).filter((r) => !q || [r.name, r.uid, r.email, r.username, r.claim_uid].some((v) => v && String(v).toLowerCase().includes(q)));
+            if (!rows.length) { $('db-rows').innerHTML = '<tr><td colspan="5"><div class="mg-empty">' + (state.rows.length ? 'Nobody matches.' : 'No participants yet. Add one below.') + '</div></td></tr>'; return; }
+            $('db-rows').innerHTML = rows.map((r) => r.type === 'request' ? requestRow(r) : participantRow(r)).join('');
+            wire();
+        }
+        function demo(r) { return [r.age ? r.age + ' y.o.' : '', r.gender ? r.gender.replace(/_/g, ' ') : ''].filter(Boolean).join(' · '); }
+        function todoList(todos) {
+            if (!todos.length) return '<span class="db-done"><i class="fas fa-check"></i> All set</span>';
+            return '<ul class="db-list">' + todos.map((t) => '<li class="' + (t.optional ? 'db-optional' : '') + '"><span class="db-who db-who--' + t.who + '">' +
+                (t.who === 'admin' ? 'Study team' : 'Participant') + '</span><span>' + esc(t.text) + '</span></li>').join('') + '</ul>';
+        }
+        function participantRow(r) {
+            const c = r.last_checkin ? new Date(r.last_checkin) : null, w = r.last_watch ? new Date(r.last_watch * 1000) : null;
+            const warn = r.warnings.length ? '<ul class="db-list">' + r.warnings.slice(0, 4).map((x) => '<li><span class="mg-dot mg-dot--' + (x.level === 'high' ? 'red' : 'orange') + '"></span><span>' +
+                esc(x.text) + (x.at ? ' <span class="db-sub">' + esc(new Date(x.at).toLocaleDateString([], { month: 'short', day: 'numeric' })) + '</span>' : '') + '</span></li>').join('') +
+                (r.warnings.length > 4 ? '<li class="db-sub">+' + (r.warnings.length - 4) + ' more</li>' : '') + '</ul>' : '<span class="db-none">None</span>';
+            return '<tr data-uid="' + esc(r.uid) + '"><td><div class="db-name"><a href="/internal_web/patient/' + encodeURIComponent(r.uid) + '">' + esc(r.name || r.uid) + '</a></div>' +
+                '<div class="db-sub">' + esc([demo(r), r.name ? r.uid : ''].filter(Boolean).join(' · ') || 'No profile yet') + '</div>' +
+                '<div class="db-sub">' + (r.email ? esc(r.email) : '<span style="color:var(--mg-warn)">No email</span>') + ' · code ' + esc(r.uid_code || 'none') + (r.has_login ? ' · <i class="fas fa-key" title="Has a web login"></i>' : '') + '</div></td>' +
+                '<td><div class="db-chips"><span class="mg-chip mg-chip--' + tone(c) + '" title="Last Mind Guard check-in"><i class="fas fa-comments"></i>' + (c ? esc(ago(c)) : 'No check-in yet') + '</span>' +
+                '<span class="mg-chip mg-chip--' + tone(w) + '" title="Last watch data"><i class="fas fa-heart-pulse"></i>' + (w ? esc(ago(w)) : 'No watch data yet') + '</span></div></td>' +
+                '<td>' + warn + '</td><td>' + todoList(r.todos) + '</td>' +
+                '<td><div class="db-actions"><a class="mg-btn mg-btn--sm" href="/internal_web/patient/' + encodeURIComponent(r.uid) + '">Open</a>' +
+                '<button class="mg-btn mg-btn--sm" data-edit="' + esc(r.uid) + '">Edit</button></div></td></tr>';
+        }
+        function requestRow(r) {
+            const what = r.kind === 'staff' ? 'Study staff' + (r.role ? ' (' + r.role + ')' : '') + ', username ' + r.username
+                : r.claim_uid ? 'Already participant ' + r.claim_uid + ': asks for a web login' : 'New participant' + (demo(r) ? ' · ' + demo(r) : '');
+            return '<tr class="db-row--request" data-req="' + esc(r.id) + '"><td><div class="db-name">' + esc(r.name) + '</div><div class="db-sub">' + esc(what) + '</div><div class="db-sub">' + esc(r.email) + '</div></td>' +
+                '<td><span class="mg-chip mg-chip--warn"><i class="fas fa-hourglass-half"></i>Waiting for review</span><div class="db-sub" style="margin-top:.3rem">Asked ' +
+                esc(r.created_at ? ago(new Date(r.created_at)) : '') + '</div></td><td><span class="db-none">None</span></td><td>' + todoList(r.todos) + '</td>' +
+                '<td><div class="db-actions"><button class="mg-btn mg-btn--sm mg-btn--primary" data-approve="' + esc(r.id) + '">Approve</button>' +
+                '<button class="mg-btn mg-btn--sm" data-reject="' + esc(r.id) + '">Reject</button></div></td></tr>';
+        }
+        function wire() {
+            document.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => {
+                const r = state.rows.find((x) => x.uid === b.dataset.edit);
+                mgEditParticipant({ uid: r.uid, email: r.email, profile: r.profile, focus: firstTodo(r), onSaved: load });
+            }));
+            document.querySelectorAll('[data-approve]').forEach((b) => (b.onclick = () => openApprove(state.rows.find((x) => x.id === b.dataset.approve))));
+            document.querySelectorAll('[data-reject]').forEach((b) => (b.onclick = async () => {
+                const r = state.rows.find((x) => x.id === b.dataset.reject);
+                if (!confirm('Reject the sign-up from ' + r.name + ' (' + r.email + ')?')) return;
+                const d = await (await fetch('/internal_web/user-management/requests/' + encodeURIComponent(r.id) + '/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+                if (!d.success) alert(d.error || 'Could not reject'); load();
+            }));
+        }
+        function firstTodo(r) {
+            const t = (r.todos || []).find((x) => x.who === 'admin');
+            return t ? { email: 'profile', profile: 'profile', clinical: 'clinical' }[t.key] : null;
+        }
+
+        // ---- approve: a new participant needs an ID; one the team created already only gets a web login; staff get a login
+        let approving = null;
+        function suggestUid(name) {
+            const base = String(name || 'p').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'p';
+            let uid = base, n = 2; const taken = new Set(state.rows.map((r) => r.uid));
+            while (taken.has(uid)) uid = base + '_' + n++;
+            return uid;
+        }
+        function openApprove(r) {
+            approving = r;
+            const isNew = r.kind === 'participant' && !r.claim_uid;
+            $('db-approve-new').hidden = !isNew;
+            $('db-approve-who').innerHTML = esc(r.name) + ' · ' + esc(r.email) + '<br><span class="mg-meta">' + (r.kind === 'staff'
+                ? 'Gets a study-team login (username ' + esc(r.username) + '); they see every participant.'
+                : r.claim_uid ? 'Already participant ' + esc(r.claim_uid) + '. Approving gives them a web login that shows only their own data.'
+                : 'Creates the participant and their watch login code, and a web login that shows only their own data.') + '</span>';
+            if (isNew) { $('db-ap-uid').value = suggestUid(r.name); $('db-ap-study').value = state.study; }
+            $('db-ap-error').hidden = true;
+            $('db-approve').showModal();
+        }
+        $('db-ap-cancel').onclick = () => $('db-approve').close();
+        $('db-approve-form').onsubmit = async (e) => {
+            e.preventDefault();
+            $('db-ap-ok').disabled = true;
+            try {
+                const d = await (await fetch('/internal_web/user-management/requests/' + encodeURIComponent(approving.id) + '/approve', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uid: $('db-ap-uid').value.trim(), study_id: $('db-ap-study').value.trim() }) })).json();
+                if (!d.success) throw new Error(d.error || 'Could not approve');
+                $('db-approve').close(); load();
+            } catch (ex) { $('db-ap-error').textContent = ex.message; $('db-ap-error').hidden = false; } finally { $('db-ap-ok').disabled = false; }
+        };
+
+        // ---- add participants
+        let mode = 'one';
+        $('db-new').querySelectorAll('.mg-tab').forEach((t) => (t.onclick = () => {
+            mode = t.dataset.mode;
+            $('db-new').querySelectorAll('.mg-tab').forEach((x) => x.setAttribute('aria-selected', String(x === t)));
+            $('db-new').querySelectorAll('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== mode));
+        }));
+        $('db-add').onclick = () => {
+            $('db-new-form').reset(); $('db-n-study').value = $('db-m-study').value = state.study;
+            $('db-n-error').hidden = true; $('db-n-result').hidden = true; $('db-n-ok').hidden = false;
+            $('db-new').showModal();
+        };
+        $('db-n-cancel').onclick = () => $('db-new').close();
+        $('db-n-name').addEventListener('input', () => { if (!$('db-n-uid').dataset.touched) $('db-n-uid').value = $('db-n-name').value ? suggestUid($('db-n-name').value) : ''; });
+        $('db-n-uid').addEventListener('input', () => ($('db-n-uid').dataset.touched = '1'));
+        const created = (list) => '<p style="margin:.5rem 0 .35rem"><strong>Created.</strong> Give each participant their watch login code for the UbiWell Connect app:</p>' +
+            '<table class="mg-table"><thead><tr><th>Participant ID</th><th>Watch login code</th></tr></thead><tbody>' +
+            list.map((u) => '<tr><td>' + esc(u.uid) + '</td><td>' + (u.ok ? '<code>' + esc(u.code) + '</code>' : '<span class="mg-error">' + esc(u.error) + '</span>') + '</td></tr>').join('') + '</tbody></table>';
+        $('db-new-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const err = $('db-n-error'); err.hidden = true; $('db-n-ok').disabled = true;
+            try {
+                if (mode === 'one') {
+                    const uid = $('db-n-uid').value.trim();
+                    if (!/^[A-Za-z0-9_-]{2,40}$/.test(uid)) throw new Error('Participant ID: 2 to 40 letters, digits, dashes or underscores.');
+                    const email = $('db-n-email').value.trim();
+                    const d = await (await fetch('/internal_web/user-management/create-single', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ uid, email: email || null, study_id: $('db-n-study').value.trim() || state.study }) })).json();
+                    if (!d.success) throw new Error(d.error || 'Could not create');
+                    const prof = { name: $('db-n-name').value.trim(), age: $('db-n-age').value.trim(), gender: $('db-n-gender').value };
+                    if (prof.name || prof.age || prof.gender || email) {
+                        const p = await (await fetch('/internal_web/participants/' + encodeURIComponent(uid) + '/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(Object.assign(prof, { email })) })).json();
+                        if (!p.success) throw new Error('Created ' + uid + ', but the profile was not saved: ' + p.error);
+                    }
+                    $('db-n-result').innerHTML = created([{ uid, ok: true, code: d.user.uid_code }]);
+                } else {
+                    const prefix = $('db-m-prefix').value.trim(), n = parseInt($('db-m-count').value, 10), start = parseInt($('db-m-start').value, 10) || 1;
+                    if (!/^[A-Za-z0-9_-]{1,30}$/.test(prefix)) throw new Error('ID prefix: letters, digits, dashes or underscores.');
+                    if (!(n >= 1 && n <= 100)) throw new Error('How many: 1 to 100.');
+                    const d = await (await fetch('/internal_web/user-management/create-multiple', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_prefix: prefix, num_users: n, start_id: start, study_id: $('db-m-study').value.trim() || state.study }) })).json();
+                    if (!d.success) throw new Error(d.error || 'Could not create');
+                    $('db-n-result').innerHTML = created(d.results.map((x) => ({ uid: x.uid, ok: x.result.success, code: x.result.success && x.result.user.uid_code, error: x.result.error })));
+                }
+                $('db-n-result').hidden = false; $('db-n-ok').hidden = true;
+                load();
+            } catch (ex) { err.textContent = ex.message; err.hidden = false; } finally { $('db-n-ok').disabled = false; }
+        };
+
+        $('db-search').addEventListener('input', (e) => { state.q = e.target.value.trim(); render(); });
+        $('db-refresh').onclick = load;
+        $('db-export').onclick = () => { location.href = '/internal_web/user-management/export'; };
+        load();
+    })();
+    </script>
+</body>
+</html>

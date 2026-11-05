@@ -1,4 +1,5 @@
-{# The one nav bar for every signed-in page. The active link is picked from the URL. #}
+{# The one nav bar for every signed-in page. The active link is picked from the URL.
+   Study staff get every section; a participant signed in on the web sees only their own page. #}
 {% set p = request.path %}
 <nav class="navbar navbar-expand-xl mg-nav">
     <div class="container">
@@ -10,14 +11,10 @@
         </button>
         <div class="collapse navbar-collapse" id="mgNav">
             <ul class="navbar-nav me-auto">
+                {% if is_admin %}
                 <li class="nav-item">
                     <a class="nav-link {% if p.startswith('/internal_web/dashboard') or p.startswith('/internal_web/patient') %}active{% endif %}" href="/internal_web/dashboard">
-                        <i class="fas fa-chart-line me-1"></i>Dashboard
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if p.startswith('/internal_web/user-management') %}active{% endif %}" href="/internal_web/user-management">
-                        <i class="fas fa-users me-1"></i>User Management
+                        <i class="fas fa-chart-line me-1"></i>Dashboard{% if pending_signups %}<span class="mg-badge-count" title="Sign-up requests waiting for review">{{ pending_signups }}</span>{% endif %}
                     </a>
                 </li>
                 <li class="nav-item">
@@ -35,9 +32,15 @@
                         <i class="fas fa-download me-1"></i>Data Export
                     </a>
                 </li>
+                {% elif viewer_uid %}
+                <li class="nav-item">
+                    <a class="nav-link active" href="/internal_web/patient/{{ viewer_uid | urlencode }}"><i class="fas fa-user me-1"></i>My data</a>
+                </li>
+                {% endif %}
             </ul>
             <div class="navbar-nav mg-account">
-                <span class="navbar-text me-3"><i class="fas fa-user me-1"></i>{{ session.get('admin_username', 'Admin') }}</span>
+                <button type="button" class="mg-theme-btn me-3" data-mg-theme-btn aria-label="Switch light or dark mode"></button>
+                <span class="navbar-text me-3"><i class="fas fa-user me-1"></i>{{ session.get('admin_username') or session.get('participant_email') or '' }}</span>
                 <a href="/internal_web/logout" class="btn btn-sm mg-logout"><i class="fas fa-sign-out-alt me-1"></i>Logout</a>
             </div>
         </div>

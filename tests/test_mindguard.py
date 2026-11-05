@@ -163,7 +163,7 @@ def test_day_page_without_checkins_says_so(web_client):
 def test_patient_page_renders_for_known_participant(web_client):
     r = web_client.get('/internal_web/patient/test_jingfei?date=2026-10-05')
     page = r.get_data(as_text=True)
-    assert r.status_code == 200 and 'pt-body' in page and '"2026-10-05"' in page
+    assert r.status_code == 200 and 'class="pt-app"' in page and '"2026-10-05"' in page
     assert 'viewdashboarddate' not in page and '/internal_web/dashboard/10-' not in page   # no jump back to the study dashboard
     assert web_client.get('/internal_web/patient/test_jingfei?date=bad').status_code == 400
     assert web_client.get('/internal_web/patient/nobody').status_code == 404
@@ -194,12 +194,14 @@ def test_day_data_includes_participant_and_wearable(web_client, db):
     db['user_code_mappings'].insert_one({'uid': 'test_jingfei', 'uid_code': 'B61H06'})
     d = day_data(web_client, '2026-10-06T04:00:00.000Z', '2026-10-07T04:00:00.000Z').json
     assert d['participant']['uid_code'] == 'B61H06' and d['participant']['email'] == 'teen@example.com'
-    hr = next(s for s in d['series'] if s['key'] == 'garmin_hr')
-    assert [p[1] for p in hr['points']] == [61.0, 64.0]              # seconds and milliseconds, this user only
+    hr = next(s for s in d['series'] if s['key'] == 'heart_rate')
+    # seconds and milliseconds land in the same minute and are averaged; the other user is left out
+    assert hr['points'] == [[1791262000 // 60 * 60, 62.5]]
 
 
 @pytest.mark.parametrize('qs', ['', 'start=x&end=y', 'start=2026-10-06T00:00:00&end=2026-10-07T00:00:00',
-                                'start=2026-10-06T00:00:00Z&end=2026-10-10T00:00:00Z'])
+                                'start=2026-10-06T00:00:00Z&end=2026-11-15T00:00:00Z',
+                                'start=2026-10-06T00:00:00Z&end=2026-10-07T00:00:00Z&tz=Not/AZone'])
 def test_day_data_rejects_bad_ranges(web_client, qs):
     assert web_client.get('/internal_web/patient/test_jingfei/data?' + qs).status_code == 400
 
@@ -238,5 +240,5 @@ def test_day_data_skips_readings_the_watch_could_not_take(web_client, db):
     r = day_data(web_client, '2026-10-06T04:00:00.000Z', '2026-10-07T04:00:00.000Z')
     import json
     json.loads(r.get_data(as_text=True))          # strict JSON: would fail on NaN
-    stress = next(s for s in r.json['series'] if s['key'] == 'garmin_stress')
-    assert stress['points'] == [[1791262068, 31.0]]
+    stress = next(s for s in r.json['series'] if s['key'] == 'stress')
+    assert stress['points'] == [[1791262068 // 60 * 60, 31.0]]

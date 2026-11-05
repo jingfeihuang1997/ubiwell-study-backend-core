@@ -12,6 +12,7 @@ import csv
 import shutil
 import math
 import re
+from urllib.parse import quote
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -23,7 +24,7 @@ from markupsafe import Markup
 from study_framework_core.core.config import get_config
 from study_framework_core.core.handlers import get_db, verify_admin_login, get_available_modules
 from study_framework_core.core.dashboard import DashboardBase
-from study_framework_core.core import mindguard
+from study_framework_core.core import mindguard, participants, patient_view, signup
 
 
 def setup_internal_web_logging():
@@ -126,11 +127,31 @@ class InternalWebBase:
         self.api.add_resource(LandingPage, '/')
         
         # Dashboard routes (now require authentication)
-        self.api.add_resource(ViewDashboard, '/dashboard')
+        self.api.add_resource(ParticipantsDashboard, '/dashboard')        # the participant list (was the daily compliance table)
+        self.api.add_resource(ParticipantsData, '/participants')
+        self.api.add_resource(ParticipantProfile, '/participants/<user>/profile')
         self.api.add_resource(ViewDashboardDate, '/dashboard/<date>')
         self.api.add_resource(ViewUserDetail, '/dashboard/view/<user>/<date>')
         self.api.add_resource(PatientPage, '/patient/<user>')
         self.api.add_resource(PatientData, '/patient/<user>/data')
+        self.api.add_resource(PatientCalendar, '/patient/<user>/calendar')
+
+        # Sign-up (public) and its review in User Management
+        self.api.add_resource(SignupPage, '/signup')
+        self.api.add_resource(SignupSubmit, '/signup/submit')
+        self.api.add_resource(SignupRequests, '/user-management/requests')
+        self.api.add_resource(SignupDecision, '/user-management/requests/<request_id>/<decision>')
+        self.api.add_resource(ParticipantStatus, '/user-management/status')
+
+        # Pending sign-ups badge on the nav bar of every signed-in page
+        @self.app.context_processor
+        def pending_signups():
+            if 'admin_logged_in' not in session:
+                return {'viewer_uid': session.get('participant_uid')}
+            try:
+                return {'pending_signups': signup.pending_count(get_db()), 'is_admin': True}
+            except Exception:
+                return {'is_admin': True}
         self.api.add_resource(ViewAnnouncement, '/dashboard/announcement')
         
         # Data download routes
@@ -146,7 +167,7 @@ class InternalWebBase:
         self.api.add_resource(ConfigFrontend, '/config-schedule')
         
         # User Management Routes
-        self.api.add_resource(UserManagementFrontend, '/user-management')
+        self.api.add_resource(UserManagementFrontend, '/user-management')     # now part of the dashboard: redirects there
         self.api.add_resource(CreateSingleUser, '/user-management/create-single')
         self.api.add_resource(CreateMultipleUsers, '/user-management/create-multiple')
         self.api.add_resource(GetUsers, '/user-management/users')
@@ -191,7 +212,9 @@ class LoginPage(Resource):
     def get(self):
         if 'admin_logged_in' in session:
             return redirect('/internal_web/')
-        
+        if session.get('participant_uid'):
+            return redirect('/internal_web/patient/' + quote(session['participant_uid']))
+
         return Response(
             render_template('login.html'),
             mimetype='text/html'
@@ -211,8 +234,19 @@ class LoginHandler(Resource):
             
             # Verify credentials
             result = verify_admin_login(username, password)
-            
+            if not result['success']:
+                uid = participants.verify_participant_login(get_db(), username, password)
+                if uid:
+                    session.clear()
+                    session['participant_uid'] = uid
+                    session['participant_email'] = username.strip().lower()
+                    session.permanent = True
+                    logging.info(f"Participant login for {uid}")
+                    return {'success': True, 'redirect': '/internal_web/patient/' + quote(uid)}, 200
+
             if result['success']:
+                session.pop('participant_uid', None)
+                session.pop('participant_email', None)
                 session['admin_logged_in'] = True
                 session['admin_username'] = username
                 session.permanent = True  # Make session permanent
@@ -241,6 +275,8 @@ class LogoutHandler(Resource):
 class LandingPage(Resource):
     """Landing page showing all available modules."""
     def get(self):
+        if session.get('participant_uid') and 'admin_logged_in' not in session:
+            return redirect('/internal_web/patient/' + quote(session['participant_uid']))
         if 'admin_logged_in' not in session:
             return redirect('/internal_web/login')
         
@@ -785,9 +821,7 @@ class UserManagementFrontend(Resource):
     def get(self):
         if 'admin_logged_in' not in session:
             return redirect('/internal_web/login')
-        
-        template = render_template("user_management.html")
-        return Response(template, mimetype="text/html")
+        return redirect('/internal_web/dashboard')
 
 
 class CreateSingleUser(Resource):
@@ -878,11 +912,6 @@ class GetUsers(Resource):
             return {'success': False, 'error': str(e)}, 500
 
 
-def not_logged_in():
-    """JSON 401 for the fetch() calls below; the pages send the browser to the login page themselves."""
-    return {'success': False, 'error': 'not logged in'}, 401
-
-
 class UpdateUserEmail(Resource):
     """Set or change a participant's email; Mind Guard matches check-ins to participants by it."""
     def post(self):
@@ -911,14 +940,68 @@ class UpdateUserEmail(Resource):
         return {'success': True, 'uid': uid, 'email': email or None}, 200
 
 
-class PatientPage(Resource):
-    """/internal_web/patient/<uid>[?date=YYYY-MM-DD]: one participant's day, wearable data beside Mind Guard.
+NO_STORE = {'Cache-Control': 'no-store'}   # data that changes as uploads arrive: never serve it from a cache
 
-    The page asks /patient/<uid>/data for the day in the viewer's own time zone, so the day and every
-    time shown follow the browser, not the server.
+
+def not_logged_in():
+    """JSON 401 for the fetch() calls below; the pages send the browser to the login page themselves."""
+    return {'success': False, 'error': 'not logged in'}, 401
+
+
+def is_admin():
+    return bool(session.get('admin_logged_in'))
+
+
+def may_view(uid):
+    """Study staff see every participant; a participant signed in on the web sees only themself."""
+    return is_admin() or (session.get('participant_uid') is not None and session.get('participant_uid') == uid)
+
+
+class ParticipantsDashboard(Resource):
+    """/internal_web/dashboard: every participant and sign-up waiting for review, when each last sent
+    data, warnings from the last week, and what is still to do (for the study team or the participant)."""
+    def get(self):
+        if not is_admin():
+            return redirect('/internal_web/login')
+        db = get_db()
+        return Response(render_template('dashboard.html', suggested_study_id=signup.suggest_study_id(db)),
+                        mimetype='text/html', headers={'Cache-Control': 'no-cache'})
+
+
+class ParticipantsData(Resource):
+    """GET /internal_web/participants: the rows of the dashboard list."""
+    def get(self):
+        if not is_admin():
+            return not_logged_in()
+        db = get_db()
+        return {'success': True, 'rows': participants.overview(db),
+                'suggested_study_id': signup.suggest_study_id(db)}, 200, NO_STORE
+
+
+class ParticipantProfile(Resource):
+    """POST /internal_web/participants/<uid>/profile: the study team sets profile fields (name, age,
+    gender, email, date of injury, history, prescriptions, recommendations). Only fields sent change."""
+    def post(self, user):
+        if not is_admin():
+            return not_logged_in()
+        try:
+            saved = participants.update_profile(get_db(), user, request.get_json(silent=True))
+        except participants.ProfileError as e:
+            return {'success': False, 'error': str(e)}, 400
+        return {'success': True, 'participant': saved}, 200
+
+
+class PatientPage(Resource):
+    """/internal_web/patient/<uid>[?date=YYYY-MM-DD]: one participant: calendar and facts on top,
+    the patient list, watch data, the Mind Guard log and the results read from it below.
+
+    The page asks /patient/<uid>/data and /calendar for the viewer's own days, so days, nights and
+    every time shown follow the browser, not the server.
     """
     def get(self, user):
-        if 'admin_logged_in' not in session:
+        if not may_view(user):
+            if session.get('participant_uid'):
+                return redirect('/internal_web/patient/' + quote(session['participant_uid']))
             return redirect('/internal_web/login')
         date = request.args.get('date', '')
         if date:
@@ -930,78 +1013,181 @@ class PatientPage(Resource):
         db = get_db()
         if not db[config.collections.USERS].find_one({'uid': user}, {'_id': 1}):
             return {"message": f"No participant {user}", "status": 404}, 404
-        participants = sorted(u['uid'] for u in db[config.collections.USERS].find({}, {'uid': 1}) if u.get('uid'))
-        return Response(render_template('patient.html', uid=user, initial_date=date, participants=participants),
-                        mimetype='text/html')
+        # no-cache: a cached copy of the page would keep running an older script after a deploy
+        people = patient_list(db, config) if is_admin() else [p for p in patient_list(db, config) if p['uid'] == user]
+        return Response(render_template('patient.html', uid=user, initial_date=date, participants=people, admin=is_admin()),
+                        mimetype='text/html',
+                        headers={'Cache-Control': 'no-cache'})
 
 
-# Garmin collections shown on the patient page: (collection, value field, label, unit)
-PATIENT_SERIES = [
-    ('GARMIN_HR', 'heart_rate', 'Heart rate', 'bpm'),
-    ('GARMIN_STRESS', 'heart_rate', 'Stress', 'score'),        # stress score is stored under heart_rate
-    ('GARMIN_RESPIRATION', 'respiration', 'Respiration', 'brpm'),
-    ('GARMIN_STEPS', 'steps', 'Steps', 'steps'),
-]
+def patient_list(db, config):
+    """The participants for the list on the patient page: name, age and gender when known, and a
+    status dot (red: a safety flag in the last 7 days, green: data in the last 3 days, grey: neither)."""
+    out = []
+    for u in db[config.collections.USERS].find({}, {'_id': 0, 'uid': 1, 'profile': 1}):
+        if not u.get('uid'):
+            continue
+        prof = u.get('profile') or {}
+        out.append({'uid': u['uid'], 'name': prof.get('name'), 'age': prof.get('age'),
+                    'gender': prof.get('gender'), 'dot': patient_view.status_dot(db, u['uid'])})
+    return sorted(out, key=lambda p: (p['name'] or p['uid']).lower())
 
 
-def _finite(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-
-
-def _epoch_seconds(ts):
+def _range_args(max_days):
+    """start/end ISO instants and an IANA tz from the query string, or an error response."""
     try:
-        ts = float(ts)
-    except (TypeError, ValueError):
+        start = datetime.fromisoformat(request.args['start'].replace('Z', '+00:00'))
+        end = datetime.fromisoformat(request.args['end'].replace('Z', '+00:00'))
+    except (KeyError, ValueError):
+        return None, ({'success': False, 'error': 'start and end must be ISO 8601 instants'}, 400)
+    if start.tzinfo is None or end.tzinfo is None or not (timedelta(0) < end - start <= timedelta(days=max_days)):
+        return None, ({'success': False, 'error': f'start/end must carry a time zone and span at most {max_days} days'}, 400)
+    tz = request.args.get('tz') or mindguard.TIMEZONE
+    try:
+        ZoneInfo(tz)
+    except Exception:
+        return None, ({'success': False, 'error': 'tz must be an IANA time zone name'}, 400)
+    return (start, end, tz), None
+
+
+def _participant(db, config, user):
+    u = db[config.collections.USERS].find_one(
+        {'uid': user}, {'_id': 0, 'study_pass': 0, 'garmin_pass': 0, 'file_encryption_key': 0})
+    if not u:
         return None
-    return ts / 1000 if ts > 1e11 else ts       # some sources write milliseconds
+    code = db[config.collections.USER_CODE_MAPPINGS].find_one({'uid': user}, {'_id': 0, 'uid_code': 1})
+    ping = db[config.collections.USER_PINGS].find_one({'uid': user}, {'_id': 0}, sort=[('_id', -1)])
+    prof = u.get('profile') or {}
+    return {
+        'uid': u['uid'], 'email': u.get('email'), 'name': prof.get('name'), 'age': prof.get('age'),
+        'gender': prof.get('gender'), 'uid_code': (code or {}).get('uid_code'),
+        'phone': prof.get('phone'), 'parent_phone': prof.get('parent_phone'),          # not collected yet
+        'clinical': {k: prof.get(k) for k in ('injury_date', 'psych_history', 'psych_note', 'mh_prescriptions',
+                                                 'mh_prescription_names', 'sleep_target_hours', 'steps_target', 'activity_note')},
+        'phase': participants.phase(prof.get('injury_date')),
+        'wearable': u.get('wearable_type'),
+        'last_phone_contact': patient_view.epoch_seconds((ping or {}).get('timestamp') or (ping or {}).get('time')),
+        'link': signup.link_status(db, u),
+    }
 
 
 class PatientData(Resource):
-    """GET /internal_web/patient/<uid>/data?start=<ISO>&end=<ISO>: everything the patient page shows for
-    [start, end), the viewer's local day sent as UTC instants."""
+    """GET /internal_web/patient/<uid>/data?start=<ISO>&end=<ISO>&tz=<IANA>[&extra=hrv,worn,phone_battery]: (at most 32 days)
+    what the patient page shows for [start, end) (a day or a week of the viewer's): watch series (and the
+    extra measures asked for), estimated sleep, the Mind Guard check-ins, the results read from them and
+    the latest questionnaires."""
     def get(self, user):
-        if 'admin_logged_in' not in session:
+        if not may_view(user):
             return not_logged_in()
-        try:
-            start = datetime.fromisoformat(request.args['start'].replace('Z', '+00:00'))
-            end = datetime.fromisoformat(request.args['end'].replace('Z', '+00:00'))
-        except (KeyError, ValueError):
-            return {'success': False, 'error': 'start and end must be ISO 8601 instants'}, 400
-        if start.tzinfo is None or end.tzinfo is None or not (timedelta(0) < end - start <= timedelta(days=2)):
-            return {'success': False, 'error': 'start/end must carry a time zone and span at most 2 days'}, 400
+        args, err = _range_args(32)        # a week, a day, or a custom range of up to 31 days (+1 for a daylight-saving hour)
+        if err:
+            return err
+        start, end, tz = args
         config = get_config()
         db = get_db()
-        profile = db[config.collections.USERS].find_one({'uid': user}, {'_id': 0, 'uid': 1, 'email': 1, 'created_at': 1})
-        if not profile:
+        who = _participant(db, config, user)
+        if not who:
             return {'success': False, 'error': f'No participant {user}'}, 404
-        code = db[config.collections.USER_CODE_MAPPINGS].find_one({'uid': user}, {'_id': 0, 'uid_code': 1})
-        ping = db[config.collections.USER_PINGS].find_one({'uid': user}, {'_id': 0}, sort=[('_id', -1)])
         lo, hi = start.timestamp(), end.timestamp()
-        series = []
-        for coll, field, label, unit in PATIENT_SERIES:
-            # Timestamps may be seconds or milliseconds; query both ranges.
-            docs = db[getattr(config.collections, coll)].find(
-                {'uid': user, '$or': [{'timestamp': {'$gte': lo, '$lt': hi}},
-                                      {'timestamp': {'$gte': lo * 1000, '$lt': hi * 1000}}]},
-                {'_id': 0, 'timestamp': 1, field: 1}).sort('timestamp', 1).limit(20000)
-            points = [[_epoch_seconds(d.get('timestamp')), d.get(field)] for d in docs]
-            # The watch logs NaN when it has no valid reading (off-wrist, moving); NaN is not JSON.
-            series.append({'key': coll.lower(), 'label': label, 'unit': unit,
-                           'points': [p for p in points if _finite(p[0]) and _finite(p[1])]})
         start_iso = start.astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%dT%H:%M:%S.000Z')
         end_iso = end.astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        checkins = mindguard.checkins_between(db, user, start_iso, end_iso)
+        watch = patient_view.load_watch(db, user, lo - patient_view.SLEEP_LOOKBACK, hi)   # one read serves both
+        extras = [k for k in (request.args.get('extra') or '').split(',') if k in patient_view.EXTRAS]
         return {
             'success': True,
-            'participant': {
-                'uid': profile['uid'],
-                'email': profile.get('email'),
-                'uid_code': (code or {}).get('uid_code'),
-                'created_at': _epoch_seconds(profile.get('created_at')),
-                'last_phone_contact': _epoch_seconds((ping or {}).get('timestamp') or (ping or {}).get('time')),
-            },
-            'series': series,
-            'checkins': mindguard.checkins_between(db, user, start_iso, end_iso),
-        }, 200
+            'participant': who,
+            'series': patient_view.watch_series(db, user, lo, hi, watch) + patient_view.extra_series(db, user, lo, hi, extras, watch),
+            'available_extras': patient_view.available_extras(db, user),
+            'sleep': patient_view.estimate_sleep(db, user, lo, hi, tz, watch),
+            'checkins': checkins,
+            'results': patient_view.check_in_results(checkins),
+            'questionnaires': patient_view.questionnaire_results(db, user, end_iso),
+        }, 200, NO_STORE
+
+
+class PatientCalendar(Resource):
+    """GET /internal_web/patient/<uid>/calendar?start=&end=: check-in starts and watch hours in a month
+    view (up to 6 weeks), plus the latest check-in and watch reading ever."""
+    def get(self, user):
+        if not may_view(user):
+            return not_logged_in()
+        args, err = _range_args(43)
+        if err:
+            return err
+        start, end, _ = args
+        db = get_db()
+        if not db[get_config().collections.USERS].find_one({'uid': user}, {'_id': 1}):
+            return {'success': False, 'error': f'No participant {user}'}, 404
+        out = patient_view.calendar_presence(db, user, start.timestamp(), end.timestamp())
+        out.update(patient_view.last_activity(db, user), success=True)
+        return out, 200, NO_STORE
+
+
+class SignupPage(Resource):
+    """/internal_web/signup: public form for participants and study staff to ask for an account."""
+    def get(self):
+        if 'admin_logged_in' in session or session.get('participant_uid'):
+            return redirect('/internal_web/')
+        return Response(render_template('signup.html', genders=signup.GENDERS), mimetype='text/html')
+
+
+class SignupSubmit(Resource):
+    """POST /internal_web/signup/submit (public): store a pending request for an admin to review."""
+    def post(self):
+        try:
+            result = signup.submit(get_db(), request.get_json(silent=True))
+        except signup.SignupError as e:
+            return {'success': False, 'error': str(e)}, 400
+        logging.info(f"Sign-up request from {result['email']} ({result['kind']})")
+        return {'success': True, 'request': result}, 200
+
+
+class SignupRequests(Resource):
+    """GET /internal_web/user-management/requests: pending sign-ups, with a suggested study ID."""
+    def get(self):
+        if 'admin_logged_in' not in session:
+            return not_logged_in()
+        db = get_db()
+        return {'success': True, 'requests': signup.pending(db),
+                'suggested_study_id': signup.suggest_study_id(db)}, 200, NO_STORE
+
+
+class SignupDecision(Resource):
+    """POST /internal_web/user-management/requests/<id>/<approve|reject>."""
+    def post(self, request_id, decision):
+        if 'admin_logged_in' not in session:
+            return not_logged_in()
+        db = get_db()
+        data = request.get_json(silent=True) or {}
+        reviewer = session.get('admin_username', 'admin')
+        try:
+            if decision == 'approve':
+                from study_framework_core.core.handlers import create_user
+                result = signup.approve(db, request_id, reviewer, uid=data.get('uid'),
+                                        study_id=data.get('study_id'), create_user=create_user)
+            elif decision == 'reject':
+                result = signup.reject(db, request_id, reviewer)
+            else:
+                return {'success': False, 'error': 'decision must be approve or reject'}, 400
+        except signup.SignupError as e:
+            return {'success': False, 'error': str(e)}, 400
+        return {'success': True, 'result': result}, 200
+
+
+class ParticipantStatus(Resource):
+    """GET /internal_web/user-management/status: profile and Alexa/watch setup per participant."""
+    def get(self):
+        if 'admin_logged_in' not in session:
+            return not_logged_in()
+        config = get_config()
+        db = get_db()
+        out = {}
+        for u in db[config.collections.USERS].find(
+                {}, {'_id': 0, 'study_pass': 0, 'garmin_pass': 0, 'file_encryption_key': 0}):
+            if u.get('uid'):
+                out[u['uid']] = dict(signup.link_status(db, u), profile=u.get('profile') or {})
+        return {'success': True, 'participants': out}, 200, NO_STORE
 
 
 class ExportUsers(Resource):

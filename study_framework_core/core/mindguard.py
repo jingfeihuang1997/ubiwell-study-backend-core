@@ -12,6 +12,7 @@ teen said is lost in the meantime.
 """
 
 import hmac
+import math
 import logging
 import re
 from datetime import datetime, timezone
@@ -77,6 +78,9 @@ def clean_checkin(payload):
         'question': _text(a.get('question')),
         'answer': _text(a.get('answer')),
         'cls': _text(a.get('cls'), 40),
+        'key': _text(a.get('key'), 40),                                   # the choice picked, e.g. mood "low"
+        'num': a.get('num') if isinstance(a.get('num'), (int, float)) and not isinstance(a.get('num'), bool)
+               and math.isfinite(a.get('num')) else None,                # a 0 to 10 rating, when asked
     } for a in _items(payload.get('answers'), 'answers') if isinstance(a, dict)]
     flags = [{
         'level': f.get('level') if f.get('level') in FLAG_LEVELS else 'SUMMARY',
